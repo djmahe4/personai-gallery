@@ -30,14 +30,14 @@ plugins {
 
 android {
   namespace = "com.google.ai.edge.gallery"
-  compileSdk = 35
+  compileSdk { this.version = release(37) { minorApiLevel = 0 } }
 
   defaultConfig {
     applicationId = "com.google.aiedge.gallery"
     minSdk = 31
-    targetSdk = 35
-    versionCode = 33
-    versionName = "1.0.15"
+    targetSdk = 37
+    versionCode = 36
+    versionName = "1.0.16"
 
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.
