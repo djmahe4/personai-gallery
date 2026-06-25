@@ -169,4 +169,5 @@
 - **Package Isolation:** Add new packages strictly as described (`com.personai.match`, `com.personai.quantum`, `com.personai.wiki`, `com.personai.pdfreasoner`). No existing Google package may be altered.
 
 ## Executing the Prompt
-To implement each stage, deploy agent: "Based on the existing `personai-gallery` structure (which remains unmodified), implement `Stage X` following the TDD steps detailed in the prompt."
+To implement each stage, deploy agent: "Based on the existing `personai-gallery` structure (which remains unmodified), implement `Stage X` following the TDD steps detailed in the prompt."<br>
+Note: Before each stage just retrospect what we implemented by combining Stage 0 and after each stage, need to evaluate the changes required in frontend.
