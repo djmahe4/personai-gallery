@@ -162,6 +162,100 @@
 
 ---
 
+## Stage 10 – Context7 MCP Integration + Hard Rate Limiting + HITL Queue
+
+**New packages** `com.personai.mcp` + `com.personai.ratelimit` + `com.personai.hitl`
+
+**Files**  
+- Context7McpClient.kt – thin wrapper that talks to the remote Context7 endpoint (`https://mcp.context7.com/mcp`) or the local npx `@upstash/context7-mcp` process if the user has installed it.  
+- RateLimitStore.kt – Room table that records every successful `resolve-library-id` / `query-docs` call with timestamp.  
+- MonthlyQuotaGuard.kt – before any Context7 call:  
+  - count calls in current calendar month;  
+  - if < 1000 → proceed;  
+  - if ≥ 1000 → enqueue a `HitlApprovalRequest` (id, library, query, timestamp, status=PENDING) and return a special `QuotaExceeded` result to the agent.  
+- HitlApprovalService.kt – foreground notification + NotificationListener that waits for user “Approve continuation” action; on approval the queued job is re-injected into the agent’s tool queue.  
+- Tool registration: expose two tools to AgentCore:  
+  - `context7_resolve_library_id(libraryName, query)`  
+  - `context7_query_docs(libraryId, query)`  
+  Both tools go through MonthlyQuotaGuard.
+
+**TDD**  
+1. `given 999 prior calls this month when one more is made then call succeeds and counter becomes 1000`.  
+2. `given 1000 prior calls when another is requested then HitlApprovalRequest is created and agent receives QuotaExceeded`.  
+3. `given pending Hitl request when user taps Approve then original tool call is re-executed and result returned to agent`.  
+4. Counter resets automatically on the 1st of each month (WorkManager midnight job).
+
+**Safety** – never store the Context7 API key in plain text; use Android Keystore.
+
+---
+
+## Stage 11 – Local Build / Deploy Engine (the critical missing piece)
+
+**Architecture choice (implement C first, keep A/B as future extension)**  
+
+Preferred path (constrained runtime – most realistic on-device):  
+```
+User prompt
+  → AgentCore + CodingAgentPipeline
+  → JSON / declarative UI + logic specification
+  → Pre-built PersonAI Runtime (a thin Android shell that can host generated Compose / View code + plugins)
+  → Instant “install” of the generated app inside the runtime (no full Gradle compile)
+```
+
+Fallback / advanced path (local build daemon):  
+```
+AI Harness APK
+      │ localhost IPC (AIDL / Unix socket)
+      ▼
+Local Build Engine (native executable or second APK)
+      ├── minimal JDK / Kotlin compiler (or pre-downloaded SDK)
+      ├── Gradle wrapper
+      ├── Android SDK platform-tools
+      └── produces signed APK → PackageInstaller
+```
+
+**New files under `com.personai.build`**  
+- BuildSpec.kt (JSON schema the agent emits)  
+- ConstrainedRuntimeHost.kt  
+- LocalBuildDaemonClient.kt (IPC)  
+- ApkInstaller.kt (PackageInstaller session)  
+- ProjectGenerator.kt (uses CodingAgentPipeline to emit Kotlin / Compose / XML / Gradle files)  
+
+**TDD**  
+1. Given a simple “Hello World dark theme” prompt, the agent produces a valid BuildSpec.  
+2. ConstrainedRuntimeHost can load the generated Compose UI and display it.  
+3. End-to-end: “Build me a network scanner with dark UI and CSV export” → generated APK appears in Downloads or is installed via PackageInstaller → can be launched.  
+4. Battery / size tests: the build engine itself must not drain > 5 % for a typical generation; generated APKs stay under a configurable size limit.
+
+---
+
+## Stage 12 – End-to-End Local Deployment on Physical Phone
+
+1. Assemble a debug / release APK of the entire PersonAI Gallery harness.  
+2. Document the exact steps (ADB install, grant NotificationListener, Accessibility, UsageStats, Overlay permissions).  
+3. Provide a one-click “Install generated app” button inside the OverlayChatService.  
+4. Write an instrumented test that runs on a real device (or emulator with Google Play) and verifies:  
+   - model download & load via LiteRT-LM,  
+   - agent can answer a simple prompt,  
+   - Context7 call is rate-limited correctly,  
+   - a generated micro-app can be installed and launched.  
+5. Final acceptance criterion: the whole system runs fully offline after the first model + optional Context7 cache download, and the user can say “Build me X” and receive a working APK on the same phone.
+
+---
+
+## Cross-Cutting Requirements (apply to every stage)
+
+- Before starting a stage, Copilot must first list the files that will be created and the tests that will be written.  
+- After each stage, run the full existing Gallery test suite + the new stage’s tests; report any regressions (there must be zero).  
+- Frontend changes are only additive (new Fragments / Activities / Compose screens); never alter original Gallery UI entry points.  
+- All WorkManager tasks declare `setRequiresDeviceIdle(true)` and `setRequiresBatteryNotLow(true)` where possible.  
+- Logging uses a single PersonAILogger that never logs PII.  
+- Every tool the agent can call must be declared in a central ToolRegistry with a JSON schema so FunctionGemma can discover it.  
+- The coding-agents five-stage pipeline is the **only** permitted way to perform multi-file edits inside a generated project.  
+- Context7 is the **only** permitted external documentation source; any other web lookup is forbidden unless the user explicitly enables a “research mode” that itself is rate-limited.
+
+---
+
 ## Global Requirements (Extended)
 - **Test-Driven Development:** For every new feature, write a test first. Use `JUnit5`, `MockK`, `Robolectric`, and `Espresso` for frontend integration tests. Every new UI component (overlay, wiki graph, PDF viewer) must have at least one integration test.
 - **Context7 MCP:** Before writing code for any new library (e.g., `FunctionGemma`, `sqlite-vector`, `PdfRenderer`), use the `context7` tool to fetch the latest documentation and ensure the code is correct.
