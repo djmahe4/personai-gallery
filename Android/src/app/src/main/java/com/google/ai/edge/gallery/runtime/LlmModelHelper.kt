@@ -72,6 +72,7 @@ interface LlmModelHelper {
    * @param systemInstruction new system instruction to guide the model's behavior after reset.
    * @param tools new or updated tools available for the model.
    * @param enableConversationConstrainedDecoding whether to enable constrained decoding.
+   * @param initialMessages messages used to reinitialize conversation history on reset.
    */
   fun resetConversation(
     model: Model,
@@ -102,7 +103,10 @@ interface LlmModelHelper {
    * @param images optional list of images provided as input context.
    * @param audioClips optional list of audio clips provided as input context.
    * @param coroutineScope optional coroutine scope for async inference execution.
-   * @param extraContext optional extra context for inference.
+   * @param extraContext optional extra context for inference (e.g. "enable_thinking").
+   * @param sessionId optional conversation session identifier for telemetry correlation.
+   * @param messageIndex optional sequential message index within the conversation for telemetry
+   *   correlation.
    */
   fun runInference(
     model: Model,
@@ -114,6 +118,8 @@ interface LlmModelHelper {
     audioClips: List<ByteArray> = listOf(),
     coroutineScope: CoroutineScope? = null,
     extraContext: Map<String, String>? = null,
+    sessionId: String? = null,
+    messageIndex: Int? = null,
   )
 
   /**

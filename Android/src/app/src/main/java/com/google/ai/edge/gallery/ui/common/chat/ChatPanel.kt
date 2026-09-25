@@ -56,7 +56,6 @@ import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.material.icons.outlined.ThumbUp
-import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -112,7 +111,6 @@ import com.google.ai.edge.gallery.ui.common.ErrorDialog
 import com.google.ai.edge.gallery.ui.common.FloatingBanner
 import com.google.ai.edge.gallery.ui.common.RotationalLoader
 import com.google.ai.edge.gallery.ui.common.ScrollToBottomButton
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.customColors
 import kotlinx.coroutines.android.awaitFrame
@@ -122,6 +120,8 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "AGChatPanel"
 private const val SCROLL_ANIMATION_DURATION_MS = 300
+
+private const val TEST_CHAT_LIMITED_NOTE_PROMO_ID = "test_chat_limited_functionality_note"
 
 /** Composable function for the main chat panel, displaying messages and handling user input. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -153,7 +153,7 @@ fun ChatPanel(
   val uiState by viewModel.uiState.collectAsState()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val messages = uiState.messagesByModel[selectedModel.name] ?: listOf()
-  val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[selectedModel.name]
+  val modelInitStatus by selectedModel.initStatusFlow.collectAsState()
   val scope = rememberCoroutineScope()
   val snackbarHostState = remember { SnackbarHostState() }
   val context = LocalContext.current
@@ -211,6 +211,13 @@ fun ChatPanel(
   var pickedAudioClipsCount by remember { mutableIntStateOf(0) }
 
   var showImageLimitBanner by remember { mutableStateOf(false) }
+  var showTestChatLimitedBanner by
+    remember(task.id) {
+      mutableStateOf(
+        task.id == BuiltInTaskId.LLM_TEST &&
+          !modelManagerViewModel.dataStoreRepository.hasViewedPromo(TEST_CHAT_LIMITED_NOTE_PROMO_ID)
+      )
+    }
 
   // Stores the heights of the items in the list, indexed by the item index.
   val itemHeights = remember { mutableStateMapOf<Int, Int>() }
@@ -303,8 +310,8 @@ fun ChatPanel(
   }
 
   // Show the error dialog when the model initialization status is error.
-  LaunchedEffect(modelInitializationStatus) {
-    showErrorDialog = modelInitializationStatus?.status == ModelInitializationStatusType.ERROR
+  LaunchedEffect(modelInitStatus) {
+    showErrorDialog = modelInitStatus is Model.InitializationStatus.Failed
   }
 
   // Scroll to the bottom when the last user message index changes (i.e. when a new user prompt is
@@ -573,19 +580,6 @@ fun ChatPanel(
                           enabled = !uiState.inProgress,
                         )
                       }
-
-                      // Benchmark button
-                      if (selectedModel.showBenchmarkButton) {
-                        MessageActionButton(
-                          label = stringResource(R.string.run_benchmark),
-                          icon = Icons.Outlined.Timer,
-                          onClick = {
-                            showBenchmarkConfigsDialog = true
-                            benchmarkMessage.value = message
-                          },
-                          enabled = !uiState.inProgress,
-                        )
-                      }
                     }
                   }
                 }
@@ -608,8 +602,8 @@ fun ChatPanel(
         }
         // Loading screen when model is initialized for that first time.
         val isFirstInitializing =
-          modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZING &&
-            modelInitializationStatus.isFirstInitialization(selectedModel)
+          modelInitStatus is Model.InitializationStatus.Initializing &&
+            modelManagerViewModel.isFirstInitialization(selectedModel)
         Column(
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.Center,
@@ -652,6 +646,20 @@ fun ChatPanel(
             Modifier.align(Alignment.TopCenter).padding(horizontal = 16.dp, vertical = 8.dp),
         )
 
+        FloatingBanner(
+          visible = showTestChatLimitedBanner,
+          text = stringResource(R.string.test_chat_limited_functionality_note),
+          actionLabel = stringResource(R.string.dont_show_again),
+          onActionClick = {
+            showTestChatLimitedBanner = false
+            modelManagerViewModel.dataStoreRepository.addViewedPromoId(
+              TEST_CHAT_LIMITED_NOTE_PROMO_ID
+            )
+          },
+          modifier =
+            Modifier.align(Alignment.TopCenter).padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+
         // "Scroll to bottom" button, only shown when the list is not at the bottom.
         Column(
           modifier =
@@ -669,6 +677,7 @@ fun ChatPanel(
 
       val modelNotSupportImageMsg = stringResource(R.string.model_not_support_image_message)
       val modelNotSupportAudioMsg = stringResource(R.string.model_not_support_audio_message)
+      val imageLimitIgnoredMsg = stringResource(R.string.image_limit_ignored_message)
 
       MessageInputText(
         task = task,
@@ -681,8 +690,7 @@ fun ChatPanel(
         audioClipMessageCount = audioClipMesssageCountToLastconfigChange,
         skillCount = skillCount,
         mcpCount = mcpCount,
-        modelInitializing =
-          modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZING,
+        modelInitializing = modelInitStatus is Model.InitializationStatus.Initializing,
         textFieldPlaceHolderRes = task.textInputPlaceHolderRes,
         onValueChanged = { curMessage = it },
         onSendMessage = {
@@ -696,7 +704,7 @@ fun ChatPanel(
             selectedModel,
             listOf(
               ChatMessagePromptTemplates(
-                templates = selectedModel.llmPromptTemplates,
+                templates = selectedModel.llmProfile?.promptTemplates ?: emptyList(),
                 showMakeYourOwn = false,
               )
             ),
@@ -721,6 +729,14 @@ fun ChatPanel(
         showAudioPicker = showAudioPicker,
         showStopButtonWhenInProgress = showStopButtonInInputWhenInProgress,
         onImageLimitExceeded = { showImageLimitBanner = true },
+        onImagesIgnored = {
+          scope.launch {
+            snackbarHostState.showSnackbar(
+              message = imageLimitIgnoredMsg,
+              duration = SnackbarDuration.Short,
+            )
+          }
+        },
         onModelNotSupportImage = { customErrorMessage = modelNotSupportImageMsg },
         onModelNotSupportAudio = { customErrorMessage = modelNotSupportAudioMsg },
       )
@@ -729,8 +745,10 @@ fun ChatPanel(
 
   // Error dialog.
   if (showErrorDialog || customErrorMessage != null) {
+    val initErrorMessage =
+      (modelInitStatus as? Model.InitializationStatus.Failed)?.error?.message ?: ""
     ErrorDialog(
-      error = customErrorMessage ?: modelInitializationStatus?.error ?: "",
+      error = customErrorMessage ?: initErrorMessage,
       onDismiss = {
         if (customErrorMessage != null) {
           customErrorMessage = null

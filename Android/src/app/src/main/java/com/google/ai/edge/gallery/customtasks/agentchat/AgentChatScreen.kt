@@ -50,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,29 +69,31 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
-import com.google.ai.edge.gallery.common.AskInfoAgentAction
-import com.google.ai.edge.gallery.common.AskMcpToolCallPermissionAction
-import com.google.ai.edge.gallery.common.CallJsAgentAction
+import com.google.ai.edge.gallery.agent.PromptExpander
 import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
-import com.google.ai.edge.gallery.common.PermissionResult
-import com.google.ai.edge.gallery.common.RequestPermissionAgentAction
-import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.AgentSkillsURLs
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.firebaseAnalytics
+import com.google.ai.edge.gallery.skills.formatSelectedSkills
+import com.google.ai.edge.gallery.tools.AskInfoToolAction
+import com.google.ai.edge.gallery.tools.AskMcpToolCallPermissionAction
+import com.google.ai.edge.gallery.tools.CallJsToolAction
+import com.google.ai.edge.gallery.tools.PermissionResult
+import com.google.ai.edge.gallery.tools.RequestPermissionToolAction
+import com.google.ai.edge.gallery.tools.SkillProgressToolAction
 import com.google.ai.edge.gallery.ui.common.BaseGalleryWebViewClient
 import com.google.ai.edge.gallery.ui.common.GalleryWebView
-import com.google.ai.edge.gallery.ui.common.buildTrackableUrlAnnotatedString
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessage
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageCollapsableProgressPanel
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageImage
@@ -101,17 +104,16 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import com.google.ai.edge.gallery.ui.common.chat.LogMessage
 import com.google.ai.edge.gallery.ui.common.chat.LogMessageLevel
 import com.google.ai.edge.gallery.ui.common.chat.SendMessageTrigger
+import com.google.ai.edge.gallery.ui.common.chat.convertToLitertMessage
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatScreen
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
-import com.google.ai.edge.litertlm.Message
-import com.google.ai.edge.litertlm.tool
 import java.lang.Exception
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 
@@ -125,7 +127,7 @@ fun AgentChatScreen(
   modelManagerViewModel: ModelManagerViewModel,
   navigateUp: () -> Unit,
   agentTools: AgentTools,
-  viewModel: LlmChatViewModel = hiltViewModel(),
+  viewModel: AgentChatViewModel = hiltViewModel(),
   skillManagerViewModel: SkillManagerViewModel = hiltViewModel(),
   mcpManagerViewModel: McpManagerViewModel = hiltViewModel(),
   initialQuery: String? = null,
@@ -133,7 +135,8 @@ fun AgentChatScreen(
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   agentTools.context = context
-  agentTools.skillManagerViewModel = skillManagerViewModel
+  agentTools.skillsProvider = skillManagerViewModel.skillManager
+  agentTools.dataStoreRepository = skillManagerViewModel.skillManager.dataStoreRepository
   agentTools.mcpManagerViewModel = mcpManagerViewModel
   agentTools.taskId = task.id
   val density = LocalDensity.current
@@ -142,7 +145,7 @@ fun AgentChatScreen(
   var showSkillManagerBottomSheet by remember { mutableStateOf(false) }
   var showMcpManagerBottomSheet by remember { mutableStateOf(false) }
   var showAskInfoDialog by remember { mutableStateOf(false) }
-  var currentAskInfoAction by remember { mutableStateOf<AskInfoAgentAction?>(null) }
+  var currentAskInfoAction by remember { mutableStateOf<AskInfoToolAction?>(null) }
   var currentMcpPermissionAction by remember {
     mutableStateOf<AskMcpToolCallPermissionAction?>(null)
   }
@@ -155,7 +158,7 @@ fun AgentChatScreen(
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
   var disabledSkillName by remember { mutableStateOf("") }
 
-  var currentPermissionAction by remember { mutableStateOf<RequestPermissionAgentAction?>(null) }
+  var currentPermissionAction by remember { mutableStateOf<RequestPermissionToolAction?>(null) }
   val permissionLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
       permissionGranted ->
@@ -185,13 +188,25 @@ fun AgentChatScreen(
   }
 
   val selectedModel = modelManagerUiState.selectedModel
-  val modelInitStatus = modelManagerUiState.modelInitializationStatus[selectedModel.name]
+  val modelInitStatus by selectedModel.initStatusFlow.collectAsState()
+
+  DisposableEffect(selectedModel.name, task.id) {
+    if (selectedModel.setupAgentSkillTopK()) {
+      modelManagerViewModel.updateConfigValuesUpdateTrigger()
+    }
+
+    onDispose {
+      if (selectedModel.cleanupAgentSkillTopK()) {
+        modelManagerViewModel.updateConfigValuesUpdateTrigger()
+      }
+    }
+  }
 
   var initialQueryConsumed by remember { mutableStateOf(false) }
 
   LaunchedEffect(
     llmChatUiState.isResettingSession,
-    modelInitStatus?.status,
+    modelInitStatus,
     selectedModel.name,
     initialQuery,
   ) {
@@ -200,7 +215,7 @@ fun AgentChatScreen(
     if (
       !initialQuery.isNullOrEmpty() &&
         !initialQueryConsumed &&
-        modelInitStatus?.status == ModelInitializationStatusType.INITIALIZED &&
+        modelInitStatus is Model.InitializationStatus.Initialized &&
         !llmChatUiState.isResettingSession
     ) {
       initialQueryConsumed = true
@@ -216,6 +231,7 @@ fun AgentChatScreen(
     modelManagerViewModel = modelManagerViewModel,
     taskId = BuiltInTaskId.LLM_AGENT_CHAT,
     navigateUp = navigateUp,
+    viewModel = viewModel,
     skillCount = skillCount,
     mcpCount = mcpCount,
     mcpToolsCount = mcpToolsCount,
@@ -269,7 +285,7 @@ fun AgentChatScreen(
         updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
       }
     },
-    onResetSessionClickedOverride = { task, _, initialMessages, clearHistory, onDone ->
+    onResetSessionClickedOverride = { task, _, initialMessages, clearHistory ->
       resetSessionWithCurrentSkillsAndMcps(
         viewModel,
         modelManagerViewModel,
@@ -277,7 +293,6 @@ fun AgentChatScreen(
         task,
         curSystemPrompt,
         agentTools,
-        onDone = { onDone() },
         initialMessages = initialMessages,
         clearHistory = clearHistory,
       )
@@ -292,7 +307,7 @@ fun AgentChatScreen(
       }
     },
     composableBelowMessageList = { model ->
-      val actionChannel = agentTools.actionChannel
+      val actionChannel = agentTools.receiveActionChannel
       val doneIcon = ImageVector.vectorResource(R.drawable.skill)
       // Use rememberUpdatedState to ensure that LaunchedEffect captures the
       // latest active model when the model is switched during an ongoing skill execution.
@@ -301,7 +316,7 @@ fun AgentChatScreen(
         for (action in actionChannel) {
           Log.d(TAG, "Handling action: $action")
           when (action) {
-            is SkillProgressAgentAction -> {
+            is SkillProgressToolAction -> {
               viewModel.updateCollapsableProgressPanelMessage(
                 model = currentModel,
                 title = action.label,
@@ -312,7 +327,7 @@ fun AgentChatScreen(
                 customData = action.customData,
               )
             }
-            is CallJsAgentAction -> {
+            is CallJsToolAction -> {
               val skillName =
                 if (action.url.contains("/skills/")) {
                   action.url.substringAfter("/skills/").substringBefore("/")
@@ -423,12 +438,12 @@ fun AgentChatScreen(
                 action.result.completeExceptionally(e)
               }
             }
-            is AskInfoAgentAction -> {
+            is AskInfoToolAction -> {
               currentAskInfoAction = action
               askInfoInputValue = "" // Reset input
               showAskInfoDialog = true
             }
-            is RequestPermissionAgentAction -> {
+            is RequestPermissionToolAction -> {
               currentPermissionAction = action
               permissionLauncher.launch(action.permission)
             }
@@ -488,8 +503,7 @@ fun AgentChatScreen(
     },
     emptyStateComposable = { model ->
       val uiState by viewModel.uiState.collectAsState()
-      val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
-      val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[model.name]
+      val initStatus by model.initStatusFlow.collectAsState()
       Box(modifier = Modifier.fillMaxSize()) {
         AnimatedVisibility(
           !WindowInsets.isImeVisible,
@@ -507,6 +521,7 @@ fun AgentChatScreen(
               Text(
                 stringResource(R.string.introducing),
                 style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
               )
               Text(
                 stringResource(R.string.agent_skills),
@@ -517,25 +532,17 @@ fun AgentChatScreen(
                       Brush.linearGradient(colors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1))),
                   ),
                 modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
+                textAlign = TextAlign.Center,
               )
               Text(
-                buildAnnotatedString {
-                  append("Use specialized, high-order reasoning by loading different skills or ")
-                  append(
-                    buildTrackableUrlAnnotatedString(
-                      url = AgentSkillsURLs.REPOSITORY,
-                      linkText = "creating\u00A0your\u00A0own",
-                    )
+                AnnotatedString.fromHtml(
+                  stringResource(
+                    R.string.agent_skills_intro,
+                    AgentSkillsURLs.REPOSITORY,
+                    AgentSkillsURLs.DISCUSSIONS,
+                    stringResource(R.string.agent_skills),
                   )
-                  append(". Explore community contributed skills on ")
-                  append(
-                    buildTrackableUrlAnnotatedString(
-                      url = AgentSkillsURLs.DISCUSSIONS,
-                      linkText = "GitHub\u00A0discussions",
-                    )
-                  )
-                  append(".\n\nTry tapping a sample prompt below to see Agent Skills in action!")
-                },
+                ),
                 style =
                   MaterialTheme.typography.headlineSmall.copy(fontSize = 16.sp, lineHeight = 22.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -553,7 +560,7 @@ fun AgentChatScreen(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-          for (promptChip in TRYOUT_CHIPS) {
+          for (promptChip in getTryOutChips(LocalContext.current)) {
             if (
               promptChip.skillName == "learn-something-new" &&
                 selectedModel.name != "Gemma-4-E4B-it"
@@ -562,8 +569,7 @@ fun AgentChatScreen(
             }
             FilledTonalButton(
               enabled =
-                modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZED &&
-                  !uiState.isResettingSession,
+                initStatus is Model.InitializationStatus.Initialized && !uiState.isResettingSession,
               onClick = {
                 // Skill is selected, trigger sending the message.
                 if (skillManagerViewModel.isSkillSelected(promptChip.skillName)) {
@@ -692,7 +698,7 @@ fun AgentChatScreen(
   if (showAlertForDisabledSkill) {
     AlertDialog(
       onDismissRequest = { showAlertForDisabledSkill = false },
-      title = { Text("The \"$disabledSkillName\" skill is currently disabled") },
+      title = { Text(stringResource(R.string.disabled_skill_dialog_title, disabledSkillName)) },
       text = { Text(stringResource(R.string.enable_skill_dialog_content)) },
       confirmButton = {
         Button(onClick = { showAlertForDisabledSkill = false }) {
@@ -715,29 +721,29 @@ private fun updateProgressPanel(viewModel: LlmChatViewModel, model: Model, agent
       lastProgressPanelMessage is ChatMessageCollapsableProgressPanel
   ) {
     if (lastProgressPanelMessage.title.startsWith("Loading")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
+      agentTools.sendToolAction(
+        SkillProgressToolAction(
           label = lastProgressPanelMessage.title.replace("Loading", "Loaded"),
           inProgress = false,
         )
       )
     } else if (lastProgressPanelMessage.title.startsWith("Calling")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
+      agentTools.sendToolAction(
+        SkillProgressToolAction(
           label = lastProgressPanelMessage.title.replace("Calling", "Called"),
           inProgress = false,
         )
       )
     } else if (lastProgressPanelMessage.title.startsWith("Executing")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
+      agentTools.sendToolAction(
+        SkillProgressToolAction(
           label = lastProgressPanelMessage.title.replace("Executing", "Executed"),
           inProgress = false,
         )
       )
     } else {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(label = lastProgressPanelMessage.title, inProgress = false)
+      agentTools.sendToolAction(
+        SkillProgressToolAction(label = lastProgressPanelMessage.title, inProgress = false)
       )
     }
   }
@@ -755,29 +761,30 @@ private fun resetSessionWithCurrentSkillsAndMcps(
   clearHistory: Boolean = true,
 ) {
   val model = modelManagerViewModel.uiState.value.selectedModel
-  val litertMessages = initialMessages.mapNotNull { chatMessage ->
-    if (chatMessage is ChatMessageText) {
-      if (chatMessage.side == ChatSide.USER) {
-        Message.user(chatMessage.content)
-      } else {
-        Message.model(chatMessage.content)
-      }
-    } else null
-  }
+  val litertMessages = initialMessages.mapNotNull { convertToLitertMessage(it) }
   val toolsPrompt = agentTools.mcpManagerViewModel.getToolsPrompt()
   val actualSystemPrompt = getEffectiveBaseSystemPrompt(curSystemPrompt, toolsPrompt.isNotEmpty())
+
+  val selectedSkills =
+    runBlocking(Dispatchers.Default) { skillManagerViewModel.skillManager.getAvailableSkills() }
+  val finalSystemPrompt =
+    PromptExpander()
+      .formatSystemInstructions(
+        template = actualSystemPrompt,
+        substitutions =
+          mapOf(
+            "___SKILLS___" to formatSelectedSkills(selectedSkills),
+            "___TOOLS___" to toolsPrompt,
+          ),
+      )
+
   viewModel.resetSession(
     task = task,
     model = model,
-    systemInstruction =
-      injectSkillsAndMcpTools(
-        baseSystemPrompt = actualSystemPrompt,
-        skills = skillManagerViewModel.getSelectedSkills(),
-        toolsPrompt = toolsPrompt,
-      ),
-    tools = listOf(tool(agentTools)),
-    supportImage = true,
-    supportAudio = true,
+    systemInstruction = finalSystemPrompt,
+    actionChannel = agentTools.sendActionChannel,
+    supportImage = model.supportImage,
+    supportAudio = model.supportAudio,
     onDone = { onDone(model) },
     enableConversationConstrainedDecoding = true,
     initialMessages = litertMessages,

@@ -102,9 +102,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -117,6 +117,7 @@ import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.data.resetInitialization
 import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.MarkdownText
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageWarning
@@ -127,8 +128,6 @@ import com.google.ai.edge.gallery.ui.common.getTaskIconColor
 import com.google.ai.edge.gallery.ui.common.textandvoiceinput.HoldToDictateViewModel
 import com.google.ai.edge.gallery.ui.common.textandvoiceinput.TextAndVoiceInput
 import com.google.ai.edge.gallery.ui.common.textandvoiceinput.VoiceRecognizerOverlay
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatus
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.litertlm.ToolProvider
 import kotlinx.coroutines.Dispatchers
@@ -317,10 +316,7 @@ fun MainUi(
   LaunchedEffect(model.configValues) {
     if (model.configValues != initialModelConfigValues) {
       Log.d(TAG, "model config values changed.")
-      modelManagerViewModel.setInitializationStatus(
-        model = model,
-        status = ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED),
-      )
+      model.resetInitialization()
       viewModel.reset()
     }
   }
@@ -577,12 +573,11 @@ fun MainUi(
                 // Model response.
                 if (selectedTabIndex == 0) {
                   Column(modifier = Modifier.fillMaxWidth()) {
-                    val cdResponse = stringResource(R.string.cd_model_response_text)
                     MarkdownText(
                       text = uiState.modelResponse,
                       modifier =
-                        Modifier.semantics(mergeDescendants = true) {
-                            contentDescription = cdResponse
+                        Modifier.testTag("model_response_text")
+                          .semantics(mergeDescendants = true) {
                             // Only announce when message is complete.
                             if (doneGeneratingResponse) {
                               liveRegion = LiveRegionMode.Polite
@@ -655,7 +650,7 @@ fun MainUi(
 
           // Text and voice Input.
           Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {

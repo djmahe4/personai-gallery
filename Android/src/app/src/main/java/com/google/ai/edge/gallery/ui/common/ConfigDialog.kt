@@ -125,7 +125,7 @@ fun ConfigDialog(
   initialValues: Map<String, Any>,
   onDismissed: () -> Unit,
   onOk: (values: Map<String, Any>, oldSystemPrompt: String, newSystemPrompt: String) -> Unit,
-  okBtnLabel: String = "OK",
+  okBtnLabel: String = stringResource(R.string.ok),
   subtitle: String = "",
   showCancel: Boolean = true,
   showSystemPromptEditorTab: Boolean = false,
@@ -224,19 +224,14 @@ fun ConfigDialog(
           )
         }
 
-        // Button row.
-        Row(
-          horizontalArrangement =
-            if (showSystemPromptEditorTab && selectedTabIndex == 1) {
-              Arrangement.SpaceBetween
-            } else {
-              Arrangement.End
-            },
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.padding(top = 8.dp),
-        ) {
-          // Restore default button to restore system prompt.
-          if (showSystemPromptEditorTab && selectedTabIndex == 1) {
+        // Button row(s).
+        if (showSystemPromptEditorTab && selectedTabIndex == 1) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            // Restore default button to restore system prompt.
             OutlinedButton(
               onClick = { systemPrompt = defaultSystemPrompt },
               contentPadding = SMALL_BUTTON_CONTENT_PADDING,
@@ -244,26 +239,28 @@ fun ConfigDialog(
               Text(stringResource(R.string.restore_default))
             }
           }
+        }
 
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          // Cancel button.
+          if (showCancel) {
+            TextButton(onClick = { onDismissed() }) { Text(stringResource(R.string.cancel)) }
+          }
+
+          Spacer(modifier = Modifier.width(8.dp))
+
+          // Ok button
+          Button(
+            onClick = {
+              Log.d(TAG, "Values from dialog: $values")
+              onOk(values.toMap(), savedSystemPrompt, systemPrompt)
+            }
           ) {
-            // Cancel button.
-            if (showCancel) {
-              TextButton(onClick = { onDismissed() }) { Text("Cancel") }
-            }
-
-            // Ok button
-            Button(
-              onClick = {
-                Log.d(TAG, "Values from dialog: $values")
-                onOk(values.toMap(), savedSystemPrompt, systemPrompt)
-              }
-            ) {
-              Text(okBtnLabel)
-            }
+            Text(okBtnLabel)
           }
         }
       }
@@ -310,7 +307,7 @@ fun ConfigEditorsPanel(configs: List<Config>, values: SnapshotStateMap<String, A
 fun LabelRow(config: LabelConfig, values: SnapshotStateMap<String, Any>) {
   Column(modifier = Modifier.fillMaxWidth()) {
     // Field label.
-    Text(config.key.label, style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
     // Content label.
     val label =
       try {
@@ -357,7 +354,10 @@ fun NumberSliderRow(config: NumberSliderConfig, values: SnapshotStateMap<String,
     // Field label.
     val minStr = getTextFieldDisplayValue(config.valueType, config.sliderMin)
     val maxStr = getTextFieldDisplayValue(config.valueType, config.sliderMax)
-    Text("${config.key.label} ($minStr-$maxStr)", style = MaterialTheme.typography.titleSmall)
+    Text(
+      "${stringResource(config.key.labelRes)} ($minStr-$maxStr)",
+      style = MaterialTheme.typography.titleSmall,
+    )
 
     // Controls row.
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -470,7 +470,7 @@ fun BooleanSwitchRow(config: BooleanSwitchConfig, values: SnapshotStateMap<Strin
       false
     }
   Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-    Text(config.key.label, style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
     Switch(checked = switchValue, onCheckedChange = { values[config.key.label] = it })
   }
 }
@@ -491,7 +491,7 @@ fun SegmentedButtonRow(config: SegmentedButtonConfig, values: SnapshotStateMap<S
   }
 
   Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-    Text(config.key.label, style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
     MultiChoiceSegmentedButtonRow {
       config.options.forEachIndexed { index, label ->
         SegmentedButton(
@@ -520,7 +520,7 @@ fun SegmentedButtonRow(config: SegmentedButtonConfig, values: SnapshotStateMap<S
                 .joinToString(",")
           },
           checked = selectionStates[index],
-          label = { Text(label) },
+          label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false) },
         )
       }
     }
@@ -559,7 +559,7 @@ fun BottomSheetSelectorRow(
     verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     if (showLabel) {
-      Text(config.key.label, style = MaterialTheme.typography.titleSmall)
+      Text(stringResource(config.key.labelRes), style = MaterialTheme.typography.titleSmall)
     }
     Row(
       horizontalArrangement = Arrangement.SpaceBetween,

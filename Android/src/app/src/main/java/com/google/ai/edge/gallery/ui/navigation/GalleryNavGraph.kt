@@ -30,17 +30,12 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateStartPadding
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.Scaffold
@@ -73,6 +68,7 @@ import androidx.navigation.navArgument
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskData
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
+import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.isLegacyTasks
@@ -81,15 +77,13 @@ import com.google.ai.edge.gallery.ui.benchmark.BenchmarkScreen
 import com.google.ai.edge.gallery.ui.common.ErrorDialog
 import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
 import com.google.ai.edge.gallery.ui.common.chat.ModelDownloadStatusInfoPanel
+import com.google.ai.edge.gallery.ui.common.tos.TosViewModel
 import com.google.ai.edge.gallery.ui.home.HomeScreen
-import com.google.ai.edge.gallery.ui.home.PromoScreenGm4
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.notifications.NotificationsScreen
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val TAG = "AGGalleryNavGraph"
@@ -152,13 +146,13 @@ fun GalleryNavHost(
   navController: NavHostController,
   modifier: Modifier = Modifier,
   modelManagerViewModel: ModelManagerViewModel,
+  tosViewModel: TosViewModel = hiltViewModel(),
 ) {
   val lifecycleOwner = LocalLifecycleOwner.current
   var showModelManager by remember { mutableStateOf(false) }
   var pickedTask by remember { mutableStateOf<Task?>(null) }
   var enableHomeScreenAnimation by remember { mutableStateOf(true) }
   var enableModelListAnimation by remember { mutableStateOf(true) }
-  var lastNavigatedModelName = remember { "" }
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
 
   // Track whether app is in foreground.
@@ -192,65 +186,23 @@ fun GalleryNavHost(
   ) {
     // Home screen.
     composable(route = ROUTE_HOMESCREEN) {
-      // Create a state to trigger PromoScreen fade in animation.
-      val promoId = "gm4"
-      Box(modifier = modifier.fillMaxSize()) {
-        var promoDismissed by remember { mutableStateOf(false) }
-
-        val homeScreenContent: @Composable () -> Unit = {
-          HomeScreen(
-            modelManagerViewModel = modelManagerViewModel,
-            tosViewModel = hiltViewModel(),
-            enableAnimation = enableHomeScreenAnimation,
-            navigateToTaskScreen = { task ->
-              pickedTask = task
-              enableModelListAnimation = true
-              navController.navigate(ROUTE_MODEL_LIST)
-              firebaseAnalytics?.logEvent(
-                GalleryEvent.CAPABILITY_SELECT.id,
-                Bundle().apply { putString("capability_name", task.id) },
-              )
-            },
-            onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
-            onNotificationsClicked = { navController.navigate(ROUTE_NOTIFICATIONS) },
-            gm4 = true,
+      HomeScreen(
+        modelManagerViewModel = modelManagerViewModel,
+        tosViewModel = tosViewModel,
+        enableAnimation = enableHomeScreenAnimation,
+        navigateToTaskScreen = { task ->
+          pickedTask = task
+          enableModelListAnimation = true
+          navController.navigate(ROUTE_MODEL_LIST)
+          firebaseAnalytics?.logEvent(
+            GalleryEvent.CAPABILITY_SELECT.id,
+            Bundle().apply { putString("capability_name", task.id) },
           )
-        }
-
-        // Show home page directly if promo has been viewed.
-        if (modelManagerViewModel.dataStoreRepository.hasViewedPromo(promoId = promoId)) {
-          homeScreenContent()
-        }
-        // If the promo has not been viewed, show promo screen first.
-        else {
-          AnimatedContent(
-            targetState = promoDismissed,
-            label = "PromoToHome",
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
-          ) { dismissed ->
-            if (dismissed) {
-              homeScreenContent()
-            } else {
-              var startAnimation by remember { mutableStateOf(false) }
-              LaunchedEffect(Unit) {
-                delay(0L)
-                startAnimation = true
-              }
-              AnimatedVisibility(
-                visible = startAnimation,
-                enter = scaleIn(initialScale = 1.05f, animationSpec = tween(durationMillis = 1000)),
-              ) {
-                PromoScreenGm4(
-                  onDismiss = {
-                    modelManagerViewModel.dataStoreRepository.addViewedPromoId(promoId = promoId)
-                    promoDismissed = true
-                  }
-                )
-              }
-            }
-          }
-        }
-      }
+        },
+        onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
+        onNotificationsClicked = { navController.navigate(ROUTE_NOTIFICATIONS) },
+        modifier = modifier,
+      )
     }
 
     // Model list.
@@ -277,6 +229,7 @@ fun GalleryNavHost(
           task = it,
           enableAnimation = enableModelListAnimation,
           onModelClicked = { model ->
+            modelManagerViewModel.selectModel(model)
             navController.navigate("$ROUTE_MODEL/${it.id}/${model.name}")
           },
           onBenchmarkClicked = { model ->
@@ -317,10 +270,7 @@ fun GalleryNavHost(
       val context = LocalContext.current
 
       modelManagerViewModel.getModelByName(name = modelName)?.let { initialModel ->
-        if (lastNavigatedModelName != modelName) {
-          modelManagerViewModel.selectModel(initialModel)
-          lastNavigatedModelName = modelName
-        }
+        LaunchedEffect(modelName) { modelManagerViewModel.selectModel(initialModel) }
 
         val customTask = modelManagerViewModel.getCustomTaskByTaskId(id = taskId)
         if (customTask != null) {
@@ -331,7 +281,6 @@ fun GalleryNavHost(
                   modelManagerViewModel = modelManagerViewModel,
                   onNavUp = {
                     enableModelListAnimation = false
-                    lastNavigatedModelName = ""
                     navController.navigateUp()
                   },
                   initialQuery = queryParam,
@@ -343,25 +292,27 @@ fun GalleryNavHost(
             var customNavigateUpCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
             CustomTaskScreen(
               task = customTask.task,
+              initialModel = initialModel,
               modelManagerViewModel = modelManagerViewModel,
               onNavigateUp = {
                 if (customNavigateUpCallback != null) {
                   customNavigateUpCallback?.invoke()
                 } else {
                   enableModelListAnimation = false
-                  lastNavigatedModelName = ""
                   navController.navigateUp()
 
-                  // clean up all models.
-                  for (curModel in customTask.task.models) {
-                    val instanceToCleanUp = curModel.instance
-                    scope.launch(Dispatchers.Default) {
-                      modelManagerViewModel.cleanupModel(
-                        context = context,
-                        task = customTask.task,
-                        model = curModel,
-                        instanceToCleanUp = instanceToCleanUp,
-                      )
+                  if (!customTask.keepModelAlive) {
+                    // clean up all models.
+                    for (curModel in customTask.task.models) {
+                      val instanceToCleanUp = curModel.instance
+                      scope.launch(Dispatchers.Default) {
+                        modelManagerViewModel.cleanupModel(
+                          context = context,
+                          task = customTask.task,
+                          model = curModel,
+                          instanceToCleanUp = instanceToCleanUp,
+                        )
+                      }
                     }
                   }
                 }
@@ -412,6 +363,7 @@ fun GalleryNavHost(
     ) { backStackEntry ->
       GlobalModelManager(
         viewModel = modelManagerViewModel,
+        tosViewModel = tosViewModel,
         navigateUp = {
           enableHomeScreenAnimation = false
           navController.navigateUp()
@@ -522,6 +474,7 @@ fun GalleryNavHost(
 @Composable
 private fun CustomTaskScreen(
   task: Task,
+  initialModel: Model,
   modelManagerViewModel: ModelManagerViewModel,
   disableAppBarControls: Boolean,
   hideTopBar: Boolean,
@@ -530,7 +483,16 @@ private fun CustomTaskScreen(
   content: @Composable (bottomPadding: Dp) -> Unit,
 ) {
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
-  val selectedModel = modelManagerUiState.selectedModel
+  // Use currentModel on initial composition to prevent reading stale selectedModel from
+  // ViewModel before selectModel() runs. Once ViewModel synchronizes with the current model,
+  // use the live model instance from uiState to capture ongoing configuration/state updates.
+  var currentModel by remember(initialModel.name) { mutableStateOf(initialModel) }
+  val selectedModel =
+    if (modelManagerUiState.selectedModel.name == currentModel.name) {
+      modelManagerUiState.selectedModel
+    } else {
+      currentModel
+    }
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
   var navigatingUp by remember { mutableStateOf(false) }
@@ -559,9 +521,9 @@ private fun CustomTaskScreen(
     }
   }
 
-  val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[selectedModel.name]
-  LaunchedEffect(modelInitializationStatus) {
-    showErrorDialog = modelInitializationStatus?.status == ModelInitializationStatusType.ERROR
+  val modelInitStatus by selectedModel.initStatusFlow.collectAsState()
+  LaunchedEffect(modelInitStatus) {
+    showErrorDialog = modelInitStatus is Model.InitializationStatus.Failed
   }
 
   Scaffold(
@@ -585,6 +547,7 @@ private fun CustomTaskScreen(
           onConfigChanged = { _, _ -> },
           onBackClicked = { handleNavigateUp() },
           onModelSelected = { prevModel, newSelectedModel ->
+            currentModel = newSelectedModel
             val instanceToCleanUp = prevModel.instance
             scope.launch(Dispatchers.Default) {
               // Clean up prev model.
@@ -651,8 +614,10 @@ private fun CustomTaskScreen(
   }
 
   if (showErrorDialog) {
+    val initErrorMessage =
+      (modelInitStatus as? Model.InitializationStatus.Failed)?.error?.message ?: ""
     ErrorDialog(
-      error = modelInitializationStatus?.error ?: "",
+      error = initErrorMessage,
       onDismiss = {
         showErrorDialog = false
         onNavigateUp()

@@ -24,6 +24,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.icu.text.CompactDecimalFormat
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -64,6 +65,11 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import java.io.File
 import java.io.FileOutputStream
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlinx.coroutines.CoroutineDispatcher
@@ -89,6 +95,18 @@ fun Long.humanReadableSize(si: Boolean = true, extraDecimalForGbAndAbove: Boolea
     formatString = "%.2f %sB"
   }
   return formatString.format(bytes / unit.toDouble().pow(exp.toDouble()), pre)
+}
+
+/**
+ * Formats zero bytes to match the unit of [matchingUnitOfTotalBytes] (e.g., "0 MB" when total is
+ * 71.9 MB).
+ */
+fun formatZeroBytes(matchingUnitOfTotalBytes: Long, si: Boolean = true): String {
+  val unit = if (si) 1000 else 1024
+  if (matchingUnitOfTotalBytes < unit) return "0 B"
+  val exp = (ln(matchingUnitOfTotalBytes.toDouble()) / ln(unit.toDouble())).toInt()
+  val pre = (if (si) "kMGTPE" else "KMGTPE")[exp - 1] + if (si) "" else "i"
+  return "0 ${pre}B"
 }
 
 fun Float.humanReadableDuration(): String {
@@ -135,6 +153,41 @@ fun Long.formatToHourMinSecond(): String {
 
   return parts.joinToString(" ")
 }
+
+/**
+ * Formats large counts (e.g. downloads, likes) into localized abbreviated strings (e.g. 1.2K,
+ * 3.4M).
+ */
+fun formatCount(count: Long): String {
+  return CompactDecimalFormat.getInstance(
+      Locale.getDefault(),
+      CompactDecimalFormat.CompactStyle.SHORT,
+    )
+    .format(count)
+}
+
+/**
+ * Formats an ISO-8601 last modified date string to a localized medium date format according to
+ * device locale settings.
+ */
+fun formatLastModifiedDate(lastModified: String): String {
+  if (lastModified.isBlank()) return ""
+  return try {
+    val instant = Instant.parse(lastModified)
+    val formatter =
+      DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+        .withZone(ZoneId.systemDefault())
+        .withLocale(Locale.getDefault())
+    formatter.format(instant)
+  } catch (e: Exception) {
+    if (lastModified.contains("T")) lastModified.substringBefore("T") else lastModified
+  }
+}
+
+/** Returns true if the Uri scheme is "http" or "https" (case-insensitive). */
+fun isHttpOrHttps(uri: Uri): Boolean =
+  uri.scheme?.equals("http", ignoreCase = true) == true ||
+    uri.scheme?.equals("https", ignoreCase = true) == true
 
 fun getDistinctiveColor(index: Int): Color {
   val colors =

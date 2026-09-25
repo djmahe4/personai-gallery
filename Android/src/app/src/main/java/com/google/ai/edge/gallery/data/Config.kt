@@ -17,7 +17,18 @@
 package com.google.ai.edge.gallery.data
 
 import androidx.annotation.StringRes
+import com.google.ai.edge.gallery.R
 import kotlin.math.abs
+
+private const val MIN_MAX_TOKEN = 100
+private const val MAX_MAX_TOKEN = 4096
+private const val MIN_TOPK = 1
+private const val MAX_TOPK = 100
+private const val MIN_TOPP = 0.0f
+private const val MAX_TOPP = 1.0f
+private const val MIN_TEMPERATURE = 0.0f
+private const val MAX_TEMPERATURE = 2.0f
+private const val MAX_TEMPERATURE_AI_CORE = 1.0f
 
 /**
  * The types of configuration editors available.
@@ -42,45 +53,94 @@ enum class ValueType {
   BOOLEAN,
 }
 
-data class ConfigKey(val id: String, val label: String)
+data class ConfigKey(val id: String, val label: String, @StringRes val labelRes: Int)
 
 object ConfigKeys {
-  val MAX_TOKENS = ConfigKey("max_tokens", "Max tokens")
-  val MAX_OUTPUT_TOKENS = ConfigKey("max_output_tokens", "Max output tokens")
-  val TOPK = ConfigKey("topk", "TopK")
-  val TOPP = ConfigKey("topp", "TopP")
-  val TEMPERATURE = ConfigKey("temperature", "Temperature")
-  val DEFAULT_MAX_TOKENS = ConfigKey("default_max_tokens", "Default max tokens")
-  val DEFAULT_TOPK = ConfigKey("default_topk", "Default TopK")
-  val DEFAULT_TOPP = ConfigKey("default_topp", "Default TopP")
-  val DEFAULT_TEMPERATURE = ConfigKey("default_temperature", "Default temperature")
-  val SUPPORT_IMAGE = ConfigKey("support_image", "Support image")
-  val SUPPORT_AUDIO = ConfigKey("support_audio", "Support audio")
-  val SUPPORT_TINY_GARDEN = ConfigKey("support_tiny_garden", "Support tiny garden")
-  val SUPPORT_MOBILE_ACTIONS = ConfigKey("support_mobile_actions", "Support mobile actions")
-  val SUPPORT_THINKING = ConfigKey("support_thinking", "Support thinking")
+  val MAX_TOKENS = ConfigKey("max_tokens", "Max tokens", R.string.config_label_max_tokens)
+  val MAX_OUTPUT_TOKENS =
+    ConfigKey("max_output_tokens", "Max output tokens", R.string.config_label_max_output_tokens)
+  val TOPK = ConfigKey("topk", "TopK", R.string.config_label_topk)
+  val TOPP = ConfigKey("topp", "TopP", R.string.config_label_topp)
+  val TEMPERATURE = ConfigKey("temperature", "Temperature", R.string.config_label_temperature)
+  val DEFAULT_MAX_TOKENS =
+    ConfigKey("default_max_tokens", "Default max tokens", R.string.config_label_default_max_tokens)
+  val DEFAULT_TOPK = ConfigKey("default_topk", "Default TopK", R.string.config_label_default_topk)
+  val DEFAULT_TOPP = ConfigKey("default_topp", "Default TopP", R.string.config_label_default_topp)
+  val DEFAULT_TEMPERATURE =
+    ConfigKey(
+      "default_temperature",
+      "Default temperature",
+      R.string.config_label_default_temperature,
+    )
+  val SUPPORT_IMAGE =
+    ConfigKey("support_image", "Support image", R.string.config_label_support_image)
+  val SUPPORT_AUDIO =
+    ConfigKey("support_audio", "Support audio", R.string.config_label_support_audio)
+  val SUPPORT_TINY_GARDEN =
+    ConfigKey(
+      "support_tiny_garden",
+      "Support tiny garden",
+      R.string.config_label_support_tiny_garden,
+    )
+  val SUPPORT_MOBILE_ACTIONS =
+    ConfigKey(
+      "support_mobile_actions",
+      "Support mobile actions",
+      R.string.config_label_support_mobile_actions,
+    )
+  val SUPPORT_THINKING =
+    ConfigKey("support_thinking", "Support thinking", R.string.config_label_support_thinking)
   val SUPPORT_SPECULATIVE_DECODING =
-    ConfigKey("support_speculative_decoding", "Support speculative decoding")
-  val ENABLE_THINKING = ConfigKey("enable_thinking", "Enable thinking")
+    ConfigKey(
+      "support_speculative_decoding",
+      "Support speculative decoding",
+      R.string.config_label_support_speculative_decoding,
+    )
+  val ENABLE_THINKING =
+    ConfigKey("enable_thinking", "Enable thinking", R.string.config_label_enable_thinking)
   val ENABLE_SPECULATIVE_DECODING =
-    ConfigKey("enable_speculative_decoding", "Enable speculative decoding")
-  val MAX_RESULT_COUNT = ConfigKey("max_result_count", "Max result count")
-  val USE_GPU = ConfigKey("use_gpu", "Use GPU")
-  val ACCELERATOR = ConfigKey("accelerator", "Accelerator")
-  val VISION_ACCELERATOR = ConfigKey("vision_accelerator", "Vision accelerator")
-  val COMPATIBLE_ACCELERATORS = ConfigKey("compatible_accelerators", "Compatible accelerators")
-  val WARM_UP_ITERATIONS = ConfigKey("warm_up_iterations", "Warm up iterations")
-  val BENCHMARK_ITERATIONS = ConfigKey("benchmark_iterations", "Benchmark iterations")
-  val ITERATIONS = ConfigKey("iterations", "Iterations")
-  val THEME = ConfigKey("theme", "Theme")
-  val NAME = ConfigKey("name", "Name")
-  val MODEL_TYPE = ConfigKey("model_type", "Model type")
-  val MODEL = ConfigKey("model", "Model")
+    ConfigKey(
+      "enable_speculative_decoding",
+      "Enable speculative decoding",
+      R.string.config_label_enable_speculative_decoding,
+    )
+  val MAX_RESULT_COUNT =
+    ConfigKey("max_result_count", "Max result count", R.string.config_label_max_result_count)
+  val USE_GPU = ConfigKey("use_gpu", "Use GPU", R.string.config_label_use_gpu)
+  val ACCELERATOR = ConfigKey("accelerator", "Accelerator", R.string.config_label_accelerator)
+  val VISION_ACCELERATOR =
+    ConfigKey("vision_accelerator", "Vision accelerator", R.string.config_label_vision_accelerator)
+  val COMPATIBLE_ACCELERATORS =
+    ConfigKey(
+      "compatible_accelerators",
+      "Compatible accelerators",
+      R.string.config_label_compatible_accelerators,
+    )
+  val WARM_UP_ITERATIONS =
+    ConfigKey("warm_up_iterations", "Warm up iterations", R.string.config_label_warm_up_iterations)
+  val BENCHMARK_ITERATIONS =
+    ConfigKey(
+      "benchmark_iterations",
+      "Benchmark iterations",
+      R.string.config_label_benchmark_iterations,
+    )
+  val ITERATIONS = ConfigKey("iterations", "Iterations", R.string.config_label_iterations)
+  val THEME = ConfigKey("theme", "Theme", R.string.theme_title)
+  val NAME = ConfigKey("name", "Name", R.string.name)
+  val MODEL_TYPE = ConfigKey("model_type", "Model type", R.string.config_label_model_type)
+  val MODEL = ConfigKey("model", "Model", R.string.config_label_model)
   val RESET_CONVERSATION_TURN_COUNT =
-    ConfigKey("reset_conversation_turn_count", "Number of turns before the conversation resets")
-  val PREFILL_TOKENS = ConfigKey("prefill_tokens", "Prefill tokens")
-  val DECODE_TOKENS = ConfigKey("decode_tokens", "Decode tokens")
-  val NUMBER_OF_RUNS = ConfigKey("number_of_runs", "Number of runs")
+    ConfigKey(
+      "reset_conversation_turn_count",
+      "Number of turns before the conversation resets",
+      R.string.config_label_reset_conversation_turn_count,
+    )
+  val PREFILL_TOKENS =
+    ConfigKey("prefill_tokens", "Prefill tokens", R.string.config_label_prefill_tokens)
+  val DECODE_TOKENS =
+    ConfigKey("decode_tokens", "Decode tokens", R.string.config_label_decode_tokens)
+  val NUMBER_OF_RUNS =
+    ConfigKey("number_of_runs", "Number of runs", R.string.config_label_number_of_runs)
 }
 
 /**
@@ -101,7 +161,47 @@ open class Config(
   // Changes on any configs with this field set to true will automatically trigger a model
   // re-initialization.
   open val needReinitialization: Boolean = true,
-)
+) {
+  companion object {
+    /**
+     * Creates the configuration settings displayed when importing an LLM model.
+     *
+     * When [isForTestOnly] is true, specialized task toggles (`SUPPORT_TINY_GARDEN` and
+     * `SUPPORT_MOBILE_ACTIONS`) are omitted.
+     */
+    fun createLlmImportConfigs(
+      accelerators: List<Accelerator> = DEFAULT_ACCELERATORS,
+      isForTestOnly: Boolean = false,
+    ): List<Config> {
+      return buildList {
+        add(LabelConfig(key = ConfigKeys.NAME))
+        add(LabelConfig(key = ConfigKeys.MODEL_TYPE))
+        add(createMaxTokensSliderConfig(key = ConfigKeys.DEFAULT_MAX_TOKENS))
+        add(createTopKSliderConfig(key = ConfigKeys.DEFAULT_TOPK))
+        add(createTopPSliderConfig(key = ConfigKeys.DEFAULT_TOPP))
+        add(createTemperatureSliderConfig(key = ConfigKeys.DEFAULT_TEMPERATURE))
+        add(BooleanSwitchConfig(key = ConfigKeys.SUPPORT_IMAGE, defaultValue = false))
+        add(BooleanSwitchConfig(key = ConfigKeys.SUPPORT_AUDIO, defaultValue = false))
+        if (!isForTestOnly) {
+          add(BooleanSwitchConfig(key = ConfigKeys.SUPPORT_TINY_GARDEN, defaultValue = false))
+          add(BooleanSwitchConfig(key = ConfigKeys.SUPPORT_MOBILE_ACTIONS, defaultValue = false))
+        }
+        add(BooleanSwitchConfig(key = ConfigKeys.SUPPORT_THINKING, defaultValue = false))
+        add(
+          BooleanSwitchConfig(key = ConfigKeys.SUPPORT_SPECULATIVE_DECODING, defaultValue = false)
+        )
+        add(
+          SegmentedButtonConfig(
+            key = ConfigKeys.COMPATIBLE_ACCELERATORS,
+            defaultValue = accelerators.firstOrNull()?.label.orEmpty(),
+            options = accelerators.map { it.label },
+            allowMultiple = true,
+          )
+        )
+      }
+    }
+  }
+}
 
 /** Configuration setting for a label. */
 class LabelConfig(override val key: ConfigKey, override val defaultValue: String = "") :
@@ -223,6 +323,57 @@ fun convertValueToTargetType(value: Any, valueType: ValueType): Any {
   }
 }
 
+private fun createMaxTokensSliderConfig(
+  key: ConfigKey,
+  sliderMin: Int = MIN_MAX_TOKEN,
+  sliderMax: Int = MAX_MAX_TOKEN,
+  defaultValue: Int = DEFAULT_MAX_TOKEN,
+): NumberSliderConfig =
+  NumberSliderConfig(
+    key = key,
+    sliderMin = sliderMin.toFloat(),
+    sliderMax = sliderMax.toFloat(),
+    defaultValue = defaultValue.toFloat(),
+    valueType = ValueType.INT,
+  )
+
+private fun createTopKSliderConfig(
+  key: ConfigKey = ConfigKeys.TOPK,
+  defaultValue: Int = DEFAULT_TOPK,
+): NumberSliderConfig =
+  NumberSliderConfig(
+    key = key,
+    sliderMin = MIN_TOPK.toFloat(),
+    sliderMax = MAX_TOPK.toFloat(),
+    defaultValue = defaultValue.toFloat(),
+    valueType = ValueType.INT,
+  )
+
+private fun createTopPSliderConfig(
+  key: ConfigKey = ConfigKeys.TOPP,
+  defaultValue: Float = DEFAULT_TOPP,
+): NumberSliderConfig =
+  NumberSliderConfig(
+    key = key,
+    sliderMin = MIN_TOPP,
+    sliderMax = MAX_TOPP,
+    defaultValue = defaultValue,
+    valueType = ValueType.FLOAT,
+  )
+
+private fun createTemperatureSliderConfig(
+  key: ConfigKey = ConfigKeys.TEMPERATURE,
+  sliderMax: Float = MAX_TEMPERATURE,
+  defaultValue: Float = DEFAULT_TEMPERATURE,
+): NumberSliderConfig =
+  NumberSliderConfig(
+    key = key,
+    sliderMin = MIN_TEMPERATURE,
+    sliderMax = sliderMax,
+    defaultValue = defaultValue,
+    valueType = ValueType.FLOAT,
+  )
+
 fun createLlmChatConfigs(
   defaultMaxToken: Int = DEFAULT_MAX_TOKEN,
   defaultMaxContextLength: Int? = null,
@@ -237,38 +388,19 @@ fun createLlmChatConfigs(
     LabelConfig(key = ConfigKeys.MAX_TOKENS, defaultValue = "$defaultMaxToken")
   if (defaultMaxContextLength != null) {
     maxTokensConfig =
-      NumberSliderConfig(
+      createMaxTokensSliderConfig(
         key = ConfigKeys.MAX_TOKENS,
-        sliderMin = 2000f,
-        sliderMax = defaultMaxContextLength.toFloat(),
-        defaultValue = defaultMaxToken.toFloat(),
-        valueType = ValueType.INT,
+        sliderMin = 2000,
+        sliderMax = defaultMaxContextLength,
+        defaultValue = defaultMaxToken,
       )
   }
   val configs =
     listOf(
         maxTokensConfig,
-        NumberSliderConfig(
-          key = ConfigKeys.TOPK,
-          sliderMin = 1f,
-          sliderMax = 100f,
-          defaultValue = defaultTopK.toFloat(),
-          valueType = ValueType.INT,
-        ),
-        NumberSliderConfig(
-          key = ConfigKeys.TOPP,
-          sliderMin = 0.0f,
-          sliderMax = 1.0f,
-          defaultValue = defaultTopP,
-          valueType = ValueType.FLOAT,
-        ),
-        NumberSliderConfig(
-          key = ConfigKeys.TEMPERATURE,
-          sliderMin = 0.0f,
-          sliderMax = 2.0f,
-          defaultValue = defaultTemperature,
-          valueType = ValueType.FLOAT,
-        ),
+        createTopKSliderConfig(defaultValue = defaultTopK),
+        createTopPSliderConfig(defaultValue = defaultTopP),
+        createTemperatureSliderConfig(defaultValue = defaultTemperature),
         SegmentedButtonConfig(
           key = ConfigKeys.ACCELERATOR,
           defaultValue = accelerators[0].label,
@@ -321,26 +453,14 @@ fun createAICoreConfigs(
 ): List<Config> {
   return listOf(
     LabelConfig(key = ConfigKeys.MAX_TOKENS, defaultValue = "$defaultMaxToken"),
-    NumberSliderConfig(
+    createMaxTokensSliderConfig(
       key = ConfigKeys.MAX_OUTPUT_TOKENS,
-      sliderMin = 100f,
-      sliderMax = 4096f,
-      defaultValue = defaultMaxOutputTokens.toFloat(),
-      valueType = ValueType.INT,
+      defaultValue = defaultMaxOutputTokens,
     ),
-    NumberSliderConfig(
-      key = ConfigKeys.TOPK,
-      sliderMin = 1f,
-      sliderMax = 100f,
-      defaultValue = defaultTopK.toFloat(),
-      valueType = ValueType.INT,
-    ),
-    NumberSliderConfig(
-      key = ConfigKeys.TEMPERATURE,
-      sliderMin = 0.0f,
-      sliderMax = 1.0f,
+    createTopKSliderConfig(defaultValue = defaultTopK),
+    createTemperatureSliderConfig(
+      sliderMax = MAX_TEMPERATURE_AI_CORE,
       defaultValue = defaultTemperature,
-      valueType = ValueType.FLOAT,
     ),
     SegmentedButtonConfig(
       key = ConfigKeys.ACCELERATOR,

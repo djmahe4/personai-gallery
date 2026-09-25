@@ -14,18 +14,18 @@
  * limitations under the License.
  */
 
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
   alias(libs.plugins.android.application)
   // Note: set apply to true to enable google-services (requires google-services.json).
   alias(libs.plugins.google.services) apply false
-  alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.protobuf)
   alias(libs.plugins.hilt.application)
   alias(libs.plugins.oss.licenses)
   alias(libs.plugins.ksp)
-  kotlin("kapt")
 }
 
 android {
@@ -36,8 +36,8 @@ android {
     applicationId = "com.google.aiedge.gallery"
     minSdk = 31
     targetSdk = 37
-    versionCode = 36
-    versionName = "1.0.16"
+    versionCode = 44
+    versionName = "1.0.20"
 
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.
@@ -45,6 +45,8 @@ android {
         "REPLACE_WITH_YOUR_REDIRECT_SCHEME_IN_HUGGINGFACE_APP"
     manifestPlaceholders["applicationName"] = "com.google.ai.edge.gallery.GalleryApplication"
     manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+
+    buildConfigField("String", "FEEDBACK_API_KEY", "\"\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -60,13 +62,16 @@ android {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
-  kotlinOptions {
-    jvmTarget = "11"
-    freeCompilerArgs += "-Xcontext-receivers"
-  }
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+}
+
+kotlin {
+  compilerOptions {
+    jvmTarget.set(JvmTarget.JVM_11)
+    freeCompilerArgs.addAll("-Xskip-metadata-version-check")
   }
 }
 
@@ -102,6 +107,7 @@ dependencies {
   implementation(libs.openid.appauth)
   implementation(libs.androidx.splashscreen)
   implementation(libs.protobuf.javalite)
+  implementation(libs.protobuf.kotlin.lite)
   implementation(libs.hilt.android)
   implementation(libs.hilt.navigation.compose)
   implementation(libs.play.services.oss.licenses)
@@ -110,7 +116,9 @@ dependencies {
   implementation(libs.firebase.messaging)
   implementation(libs.androidx.exifinterface)
   implementation(libs.moshi.kotlin)
-  kapt(libs.hilt.android.compiler)
+  ksp(libs.hilt.android.compiler)
+  ksp("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
+  annotationProcessor("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
   testImplementation(libs.junit)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.espresso.core)
@@ -124,9 +132,21 @@ dependencies {
   implementation(libs.mcp.kotlin.sdk)
   implementation(libs.ktor.client.android)
   implementation(libs.ktor.client.core)
+  implementation(libs.tasks.vision)
+}
+
+configurations.all {
+  resolutionStrategy.force("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
 }
 
 protobuf {
   protoc { artifact = "com.google.protobuf:protoc:4.26.1" }
-  generateProtoTasks { all().forEach { it.plugins { create("java") { option("lite") } } } }
+  generateProtoTasks {
+    all().forEach { task ->
+      task.builtins {
+        create("java") { option("lite") }
+        create("kotlin") { option("lite") }
+      }
+    }
+  }
 }

@@ -31,7 +31,6 @@ import com.google.ai.edge.gallery.proto.UserData
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
-// TODO(b/423700720): Change to async (suspend) functions
 interface DataStoreRepository {
   fun saveTextInputHistory(history: List<String>)
 
@@ -40,6 +39,27 @@ interface DataStoreRepository {
   fun saveTheme(theme: Theme)
 
   fun readTheme(): Theme
+
+  /**
+   * Saves the user's preference for whether Firebase Analytics data collection is enabled (`true`)
+   * or disabled (`false`).
+   *
+   * Note that this preference is stored internally on the Settings proto as
+   * `disable_firebase_analytics = !enabled`. This ensures that when the proto field is unset (its
+   * default value being `false`), data collection remains enabled by default across new installs
+   * and upgrades until explicitly toggled off by the user.
+   *
+   * @param enabled `true` to enable Firebase Analytics data collection; `false` to disable it.
+   */
+  fun saveFirebaseAnalytics(enabled: Boolean)
+
+  /**
+   * Reads that current setting for whether Firebase Analytics data collection is enabled.
+   *
+   * @return `true` if analytics is enabled or has not been explicitly disabled by the user; `false`
+   *   otherwise.
+   */
+  fun readFirebaseAnalytics(): Boolean
 
   fun saveSecret(key: String, value: String)
 
@@ -146,6 +166,29 @@ class DefaultDataStoreRepository(
       val curTheme = settings.theme
       // Use "auto" as the default theme.
       if (curTheme == Theme.THEME_UNSPECIFIED) Theme.THEME_AUTO else curTheme
+    }
+  }
+
+  /**
+   * Persists the inverted value (`!enabled`) into `settings.disableFirebaseAnalytics` within proto
+   * DataStore.
+   */
+  override fun saveFirebaseAnalytics(enabled: Boolean) {
+    runBlocking {
+      dataStore.updateData { settings ->
+        settings.toBuilder().setDisableFirebaseAnalytics(!enabled).build()
+      }
+    }
+  }
+
+  /**
+   * Reads `settings.disableFirebaseAnalytics` from proto DataStore and returns the inverted value
+   * so that `false` (default uninitialized value) evaluates to `true` (enabled).
+   */
+  override fun readFirebaseAnalytics(): Boolean {
+    return runBlocking {
+      val settings = dataStore.data.first()
+      !settings.disableFirebaseAnalytics
     }
   }
 

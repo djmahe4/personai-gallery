@@ -37,6 +37,7 @@ const val KEY_MODEL_IS_ZIP = "KEY_MODEL_IS_ZIP"
 const val KEY_MODEL_UNZIPPED_DIR = "KEY_MODEL_UNZIPPED_DIR"
 const val KEY_MODEL_START_UNZIPPING = "KEY_MODEL_START_UNZIPPING"
 const val KEY_MODEL_IS_IMPORTED = "KEY_MODEL_IS_IMPORTED"
+const val KEY_MODEL_EXTRA_DATA_ONLY = "KEY_MODEL_EXTRA_DATA_ONLY"
 
 // Default values for LLM models.
 const val DEFAULT_MAX_TOKEN = 1024
@@ -46,6 +47,9 @@ const val DEFAULT_TEMPERATURE = 1.0f
 const val DEFAULT_MAX_OUTPUT_TOKEN = 1024
 val DEFAULT_ACCELERATORS = listOf(Accelerator.GPU)
 val DEFAULT_VISION_ACCELERATOR = Accelerator.GPU
+
+// LiteRT LM Engine constants.
+const val THOUGHT_CHANNEL = "thought"
 
 // Max number of images allowed in a "ask image" session.
 const val MAX_IMAGE_COUNT = 10

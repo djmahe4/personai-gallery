@@ -22,6 +22,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.common.processLlmResponse
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.data.awaitInitialization
 import com.google.ai.edge.gallery.runtime.runtimeHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -61,16 +62,25 @@ class LlmSingleTurnViewModel @Inject constructor() : ViewModel() {
       setPreparing(true)
 
       // Wait for instance to be initialized.
-      while (model.instance == null) {
-        delay(100)
+      if (model.instance == null) {
+        try {
+          model.awaitInitialization()
+        } catch (e: Exception) {
+          setPreparing(false)
+          setInProgress(false)
+          return@launch
+        }
+      }
+      if (model.instance == null) {
+        setPreparing(false)
+        setInProgress(false)
+        return@launch
       }
 
       val supportImage =
-        model.llmSupportImage &&
-          task.id == com.google.ai.edge.gallery.data.BuiltInTaskId.LLM_ASK_IMAGE
+        model.supportImage && task.id == com.google.ai.edge.gallery.data.BuiltInTaskId.LLM_ASK_IMAGE
       val supportAudio =
-        model.llmSupportAudio &&
-          task.id == com.google.ai.edge.gallery.data.BuiltInTaskId.LLM_ASK_AUDIO
+        model.supportAudio && task.id == com.google.ai.edge.gallery.data.BuiltInTaskId.LLM_ASK_AUDIO
       model.runtimeHelper.resetConversation(
         model = model,
         supportImage = supportImage,
@@ -118,7 +128,7 @@ class LlmSingleTurnViewModel @Inject constructor() : ViewModel() {
   }
 
   fun selectPromptTemplate(model: Model, promptTemplateType: PromptTemplateType) {
-    Log.d(TAG, "selecting prompt template: ${promptTemplateType.label}")
+    Log.d(TAG, "selecting prompt template: ${promptTemplateType.name}")
 
     // Clear response.
     updateResponse(model = model, promptTemplateType = promptTemplateType, response = "")
@@ -140,7 +150,7 @@ class LlmSingleTurnViewModel @Inject constructor() : ViewModel() {
     _uiState.update { currentState ->
       val currentResponses = currentState.responsesByModel
       val modelResponses = currentResponses[model.name]?.toMutableMap() ?: mutableMapOf()
-      modelResponses[promptTemplateType.label] = response
+      modelResponses[promptTemplateType.name] = response
       val newResponses = currentResponses.toMutableMap()
       newResponses[model.name] = modelResponses
       currentState.copy(responsesByModel = newResponses)

@@ -30,51 +30,74 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.agent.AgentRuntimeConfig
+import com.google.ai.edge.gallery.agent.AgentRuntimeExecutor
+import com.google.ai.edge.gallery.agent.AiChatExecutor
 import com.google.ai.edge.gallery.customtasks.common.CustomTask
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.runtime.runtimeHelper
 import com.google.ai.edge.gallery.ui.theme.emptyStateContent
 import com.google.ai.edge.gallery.ui.theme.emptyStateTitle
 import com.google.ai.edge.litertlm.Contents
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoSet
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// AI Chat.
+// Shared base for multi-turn LLM chat tasks.
 
-class LlmChatTask @Inject constructor() : CustomTask {
-  override val task: Task =
+/**
+ * Shared base [CustomTask] for multi-turn LLM chat tasks ([LlmChatTask] and [LlmTestTask]).
+ *
+ * Encapsulates model initialization, cleanup, and [LlmChatScreen] composition so concrete chat
+ * tasks share core behavior without concrete-to-concrete inheritance.
+ */
+abstract class BaseLlmChatTask(
+  context: Context,
+  private val executor: AgentRuntimeExecutor,
+  taskId: String,
+  labelRes: Int,
+  descriptionRes: Int,
+  shortDescriptionRes: Int = descriptionRes,
+  private val emptyStateTitleRes: Int = labelRes,
+  private val emptyStateContentRes: Int = descriptionRes,
+) : CustomTask {
+  override val task: Task by lazy {
     Task(
-      id = BuiltInTaskId.LLM_CHAT,
-      label = "AI Chat",
+      id = taskId,
+      label = context.getString(labelRes),
       category = Category.LLM,
       icon = Icons.Outlined.Forum,
       models = mutableListOf(),
-      description = "Chat with on-device large language models",
-      shortDescription = "Chat with an on-device LLM",
+      description = context.getString(descriptionRes),
+      shortDescription = context.getString(shortDescriptionRes),
       docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
       sourceCodeUrl =
         "https://github.com/google-ai-edge/gallery/blob/main/Android/src/app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatModelHelper.kt",
       textInputPlaceHolderRes = R.string.text_input_placeholder_llm_chat,
     )
+  }
 
   override fun initializeModelFn(
     context: Context,
@@ -83,16 +106,17 @@ class LlmChatTask @Inject constructor() : CustomTask {
     systemInstruction: Contents?,
     onDone: (String) -> Unit,
   ) {
-    model.runtimeHelper.initialize(
-      context = context,
-      model = model,
-      taskId = task.id,
-      supportImage = false,
-      supportAudio = false,
-      onDone = onDone,
-      coroutineScope = coroutineScope,
-      systemInstruction = systemInstruction,
-    )
+    coroutineScope.launch(Dispatchers.Default) {
+      val config =
+        AgentRuntimeConfig(
+          model = model,
+          taskId = task.id,
+          supportImage = model.supportImage,
+          supportAudio = model.supportAudio,
+          systemInstruction = systemInstruction?.toString(),
+        )
+      executor.initialize(context = context, config = config, onDone = onDone)
+    }
   }
 
   override fun cleanUpModelFn(
@@ -101,7 +125,7 @@ class LlmChatTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: () -> Unit,
   ) {
-    model.runtimeHelper.cleanUp(model = model, onDone = onDone)
+    executor.cleanUp(onDone = onDone)
   }
 
   @Composable
@@ -109,14 +133,17 @@ class LlmChatTask @Inject constructor() : CustomTask {
     val myData = data as CustomTaskDataForBuiltinTask
     val viewModel: LlmChatViewModel = hiltViewModel()
     LaunchedEffect(task) { viewModel.loadSystemPrompt(task) }
-    val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
+    val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsStateWithLifecycle()
     val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
     LlmChatScreen(
       modelManagerViewModel = myData.modelManagerViewModel,
       navigateUp = myData.onNavUp,
       viewModel = viewModel,
+      taskId = task.id,
       allowEditingSystemPrompt = true,
       curSystemPrompt = uiSystemPrompt,
+      showImagePicker = true,
+      showAudioPicker = true,
       onSystemPromptChanged = { newPrompt ->
         val selectedModel = myData.modelManagerViewModel.uiState.value.selectedModel
         viewModel.applySystemPromptChange(
@@ -126,7 +153,7 @@ class LlmChatTask @Inject constructor() : CustomTask {
           systemPromptUpdatedMessage = systemPromptUpdatedMessage,
         )
       },
-      emptyStateComposable = {
+      emptyStateComposable = { model ->
         Box(modifier = Modifier.fillMaxSize()) {
           Column(
             modifier =
@@ -134,13 +161,45 @@ class LlmChatTask @Inject constructor() : CustomTask {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
-            Text(stringResource(R.string.aichat_emptystate_title), style = emptyStateTitle)
             Text(
-              stringResource(R.string.aichat_emptystate_content),
+              stringResource(emptyStateTitleRes),
+              style = emptyStateTitle,
+              modifier = Modifier.semantics { heading() },
+            )
+            Text(
+              stringResource(emptyStateContentRes),
               style = emptyStateContent,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               textAlign = TextAlign.Center,
             )
+            val multimodalRes =
+              when {
+                model.supportImage && model.supportAudio -> {
+                  if (model.isAiCore) {
+                    R.string.aichat_emptystate_support_image_aicore_audio
+                  } else {
+                    R.string.aichat_emptystate_support_image_audio
+                  }
+                }
+                model.supportImage -> {
+                  if (model.isAiCore) {
+                    R.string.aichat_emptystate_support_image_aicore
+                  } else {
+                    R.string.aichat_emptystate_support_image
+                  }
+                }
+                model.supportAudio -> R.string.aichat_emptystate_support_audio
+                else -> null
+              }
+
+            if (multimodalRes != null) {
+              Text(
+                stringResource(multimodalRes),
+                style = emptyStateContent,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+              )
+            }
           }
         }
       },
@@ -148,34 +207,60 @@ class LlmChatTask @Inject constructor() : CustomTask {
   }
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// AI Chat.
+
+class LlmChatTask
+@Inject
+constructor(@ApplicationContext context: Context, @AiChatExecutor executor: AgentRuntimeExecutor) :
+  BaseLlmChatTask(
+    context = context,
+    executor = executor,
+    taskId = BuiltInTaskId.LLM_CHAT,
+    labelRes = R.string.task_label_ai_chat,
+    descriptionRes = R.string.task_desc_ai_chat,
+    shortDescriptionRes = R.string.task_short_desc_ai_chat,
+    emptyStateTitleRes = R.string.aichat_emptystate_title,
+    emptyStateContentRes = R.string.aichat_emptystate_content,
+  )
+
 @Module
 @InstallIn(SingletonComponent::class) // Or another component that fits your scope
 internal object LlmChatTaskModule {
   @Provides
   @IntoSet
-  fun provideTask(): CustomTask {
-    return LlmChatTask()
+  fun provideTask(
+    @ApplicationContext context: Context,
+    @AiChatExecutor executor: AgentRuntimeExecutor,
+  ): CustomTask {
+    return LlmChatTask(context, executor)
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Ask image.
 
-class LlmAskImageTask @Inject constructor() : CustomTask {
-  override val task: Task =
+class LlmAskImageTask
+@Inject
+constructor(
+  @ApplicationContext private val context: Context,
+  @AiChatExecutor private val executor: AgentRuntimeExecutor,
+) : CustomTask {
+  override val task: Task by lazy {
     Task(
       id = BuiltInTaskId.LLM_ASK_IMAGE,
-      label = "Ask Image",
+      label = context.getString(R.string.task_label_ask_image),
       category = Category.LLM,
       icon = Icons.Outlined.Mms,
       models = mutableListOf(),
-      description = "Ask questions about images with on-device large language models",
-      shortDescription = "Ask questions about images",
+      description = context.getString(R.string.task_desc_ask_image),
+      shortDescription = context.getString(R.string.task_short_desc_ask_image),
       docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
       sourceCodeUrl =
         "https://github.com/google-ai-edge/gallery/blob/main/Android/src/app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatModelHelper.kt",
       textInputPlaceHolderRes = R.string.text_input_placeholder_llm_chat,
     )
+  }
 
   override fun initializeModelFn(
     context: Context,
@@ -184,16 +269,17 @@ class LlmAskImageTask @Inject constructor() : CustomTask {
     systemInstruction: Contents?,
     onDone: (String) -> Unit,
   ) {
-    model.runtimeHelper.initialize(
-      context = context,
-      model = model,
-      taskId = task.id,
-      supportImage = true,
-      supportAudio = false,
-      onDone = onDone,
-      coroutineScope = coroutineScope,
-      systemInstruction = systemInstruction,
-    )
+    coroutineScope.launch(Dispatchers.Default) {
+      val config =
+        AgentRuntimeConfig(
+          model = model,
+          taskId = task.id,
+          supportImage = true,
+          supportAudio = false,
+          systemInstruction = systemInstruction?.toString(),
+        )
+      executor.initialize(context = context, config = config, onDone = onDone)
+    }
   }
 
   override fun cleanUpModelFn(
@@ -202,7 +288,7 @@ class LlmAskImageTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: () -> Unit,
   ) {
-    model.runtimeHelper.cleanUp(model = model, onDone = onDone)
+    executor.cleanUp(onDone = onDone)
   }
 
   @Composable
@@ -210,7 +296,7 @@ class LlmAskImageTask @Inject constructor() : CustomTask {
     val myData = data as CustomTaskDataForBuiltinTask
     val viewModel: LlmAskImageViewModel = hiltViewModel()
     LaunchedEffect(task) { viewModel.loadSystemPrompt(task) }
-    val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
+    val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsStateWithLifecycle()
     val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
     LlmAskImageScreen(
       modelManagerViewModel = myData.modelManagerViewModel,
@@ -236,30 +322,38 @@ class LlmAskImageTask @Inject constructor() : CustomTask {
 internal object LlmAskImageModule {
   @Provides
   @IntoSet
-  fun provideTask(): CustomTask {
-    return LlmAskImageTask()
+  fun provideTask(
+    @ApplicationContext context: Context,
+    @AiChatExecutor executor: AgentRuntimeExecutor,
+  ): CustomTask {
+    return LlmAskImageTask(context, executor)
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Ask audio.
 
-class LlmAskAudioTask @Inject constructor() : CustomTask {
-  override val task: Task =
+class LlmAskAudioTask
+@Inject
+constructor(
+  @ApplicationContext private val context: Context,
+  @AiChatExecutor private val executor: AgentRuntimeExecutor,
+) : CustomTask {
+  override val task: Task by lazy {
     Task(
       id = BuiltInTaskId.LLM_ASK_AUDIO,
-      label = "Audio Scribe",
+      label = context.getString(R.string.task_label_audio_scribe),
       category = Category.LLM,
       icon = Icons.Outlined.Mic,
       models = mutableListOf(),
-      description =
-        "Instantly transcribe and/or translate audio clips using on-device large language models",
-      shortDescription = "Transcribe and translate audio",
+      description = context.getString(R.string.task_desc_audio_scribe),
+      shortDescription = context.getString(R.string.task_short_desc_audio_scribe),
       docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
       sourceCodeUrl =
         "https://github.com/google-ai-edge/gallery/blob/main/Android/src/app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatModelHelper.kt",
       textInputPlaceHolderRes = R.string.text_input_placeholder_llm_chat,
     )
+  }
 
   override fun initializeModelFn(
     context: Context,
@@ -268,16 +362,17 @@ class LlmAskAudioTask @Inject constructor() : CustomTask {
     systemInstruction: Contents?,
     onDone: (String) -> Unit,
   ) {
-    model.runtimeHelper.initialize(
-      context = context,
-      model = model,
-      taskId = task.id,
-      supportImage = false,
-      supportAudio = true,
-      onDone = onDone,
-      coroutineScope = coroutineScope,
-      systemInstruction = systemInstruction,
-    )
+    coroutineScope.launch(Dispatchers.Default) {
+      val config =
+        AgentRuntimeConfig(
+          model = model,
+          taskId = task.id,
+          supportImage = false,
+          supportAudio = true,
+          systemInstruction = systemInstruction?.toString(),
+        )
+      executor.initialize(context = context, config = config, onDone = onDone)
+    }
   }
 
   override fun cleanUpModelFn(
@@ -286,7 +381,7 @@ class LlmAskAudioTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: () -> Unit,
   ) {
-    model.runtimeHelper.cleanUp(model = model, onDone = onDone)
+    executor.cleanUp(onDone = onDone)
   }
 
   @Composable
@@ -294,7 +389,7 @@ class LlmAskAudioTask @Inject constructor() : CustomTask {
     val myData = data as CustomTaskDataForBuiltinTask
     val viewModel: LlmAskAudioViewModel = hiltViewModel()
     LaunchedEffect(task) { viewModel.loadSystemPrompt(task) }
-    val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
+    val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsStateWithLifecycle()
     val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
     LlmAskAudioScreen(
       modelManagerViewModel = myData.modelManagerViewModel,
@@ -320,7 +415,10 @@ class LlmAskAudioTask @Inject constructor() : CustomTask {
 internal object LlmAskAudioModule {
   @Provides
   @IntoSet
-  fun provideTask(): CustomTask {
-    return LlmAskAudioTask()
+  fun provideTask(
+    @ApplicationContext context: Context,
+    @AiChatExecutor executor: AgentRuntimeExecutor,
+  ): CustomTask {
+    return LlmAskAudioTask(context, executor)
   }
 }

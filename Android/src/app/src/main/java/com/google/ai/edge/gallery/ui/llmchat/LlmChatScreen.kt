@@ -17,7 +17,6 @@
 package com.google.ai.edge.gallery.ui.llmchat
 
 import androidx.hilt.navigation.compose.hiltViewModel
-
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
@@ -29,33 +28,42 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.agent.sessions.generateSessionId
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelCapability
-import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessage
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageImage
+import com.google.ai.edge.gallery.ui.common.chat.ChatMessageMapper
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageText
-import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import com.google.ai.edge.gallery.ui.common.chat.ChatView
 import com.google.ai.edge.gallery.ui.common.chat.SendMessageTrigger
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.emptyStateContent
 import com.google.ai.edge.gallery.ui.theme.emptyStateTitle
-import com.google.ai.edge.litertlm.Contents
-import com.google.ai.edge.litertlm.Message
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 private const val TAG = "AGLlmChatScreen"
 
@@ -69,8 +77,7 @@ fun LlmChatScreen(
   onGenerateResponseDone: (Model) -> Unit = {},
   onSkillClicked: () -> Unit = {},
   onMcpClicked: () -> Unit = {},
-  onResetSessionClickedOverride: ((Task, Model, List<ChatMessage>, Boolean, () -> Unit) -> Unit)? =
-    null,
+  onResetSessionClickedOverride: ((Task, Model, List<ChatMessage>, Boolean) -> Unit)? = null,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
   viewModel: LlmChatViewModel = hiltViewModel(),
   allowEditingSystemPrompt: Boolean = false,
@@ -140,9 +147,13 @@ fun LlmAskImageScreen(
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-          Text(stringResource(R.string.askimage_emptystate_title), style = emptyStateTitle)
+          Text(
+            stringResource(R.string.askimage_emptystate_title),
+            style = emptyStateTitle,
+            modifier = Modifier.semantics { heading() },
+          )
           val contentRes =
-            if (model.runtimeType == RuntimeType.AICORE) {
+            if (model.isAiCore) {
               R.string.askimage_emptystate_content_aicore
             } else {
               R.string.askimage_emptystate_content
@@ -188,7 +199,11 @@ fun LlmAskAudioScreen(
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-          Text(stringResource(R.string.askaudio_emptystate_title), style = emptyStateTitle)
+          Text(
+            stringResource(R.string.askaudio_emptystate_title),
+            style = emptyStateTitle,
+            modifier = Modifier.semantics { heading() },
+          )
           Text(
             stringResource(R.string.askaudio_emptystate_content),
             style = emptyStateContent,
@@ -212,8 +227,7 @@ fun ChatViewWrapper(
   onMcpClicked: () -> Unit = {},
   onFirstToken: (Model) -> Unit = {},
   onGenerateResponseDone: (Model) -> Unit = {},
-  onResetSessionClickedOverride: ((Task, Model, List<ChatMessage>, Boolean, () -> Unit) -> Unit)? =
-    null,
+  onResetSessionClickedOverride: ((Task, Model, List<ChatMessage>, Boolean) -> Unit)? = null,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
   emptyStateComposable: @Composable (Model) -> Unit = {},
   allowEditingSystemPrompt: Boolean = false,
@@ -230,6 +244,7 @@ fun ChatViewWrapper(
   val context = LocalContext.current
   val task = modelManagerViewModel.getTaskById(id = taskId)!!
   val scope = rememberCoroutineScope()
+  var sessionRestoreJob by remember { mutableStateOf<Job?>(null) }
 
   ChatView(
     task = task,
@@ -318,20 +333,56 @@ fun ChatViewWrapper(
       }
     },
     onBenchmarkClicked = { _, _, _, _ -> },
-    onResetSessionClicked = { model, chatMessages, clearHistory, onDone ->
-      val litertMessages = chatMessages.mapNotNull { convertToLitertMessage(it) }
+    onRestoreSessionClicked = { session ->
+      sessionRestoreJob?.cancel()
+      val selectedModel = modelManagerViewModel.uiState.value.selectedModel
       if (onResetSessionClickedOverride != null) {
-        onResetSessionClickedOverride(task, model, chatMessages, clearHistory, onDone)
+        viewModel.stopResponse(model = selectedModel)
+        viewModel.setIsResettingSession(true)
+        sessionRestoreJob = scope.launch {
+          try {
+            val messages = ChatMessageMapper.deserializeProtoMessages(session.messagesList)
+            ensureActive()
+            viewModel.currentSessionId = session.sessionId
+            viewModel.setRestoredMessages(model = selectedModel, messages = messages)
+            onResetSessionClickedOverride(task, selectedModel, messages, /* clearHistory= */ false)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore session: ${e.message}", e)
+          } finally {
+            if (coroutineContext.isActive) {
+              viewModel.setIsResettingSession(false)
+            }
+          }
+        }
       } else {
-        viewModel.resetSession(
+        viewModel.restoreSession(
+          session = session,
           task = task,
-          model = model,
-          systemInstruction = Contents.of(curSystemPrompt),
+          model = selectedModel,
+          systemInstruction = curSystemPrompt,
           supportImage = showImagePicker,
           supportAudio = showAudioPicker,
-          initialMessages = litertMessages,
-          onDone = onDone,
-          clearHistory = clearHistory,
+        )
+      }
+    },
+    onNewChatClicked = {
+      sessionRestoreJob?.cancel()
+      val selectedModel = modelManagerViewModel.uiState.value.selectedModel
+      if (onResetSessionClickedOverride != null) {
+        viewModel.stopResponse(model = selectedModel)
+        viewModel.setIsResettingSession(false)
+        viewModel.currentSessionId = generateSessionId()
+        viewModel.clearAllMessages(model = selectedModel)
+        onResetSessionClickedOverride(task, selectedModel, emptyList(), /* clearHistory= */ true)
+      } else {
+        viewModel.startNewSession(
+          task = task,
+          model = selectedModel,
+          systemInstruction = curSystemPrompt,
+          supportImage = showImagePicker,
+          supportAudio = showAudioPicker,
         )
       }
     },
@@ -352,19 +403,4 @@ fun ChatViewWrapper(
     sendMessageTrigger = sendMessageTrigger,
     showAudioPicker = showAudioPicker,
   )
-}
-
-private fun convertToLitertMessage(chatMessage: ChatMessage): Message? {
-  // TODO: Restore image and audio messages to the LLM context.
-  // We are currently bypassing them because the image and audio encoder may take
-  // too long during chat history loading, which can cause stalls or stream errors.
-  if (chatMessage is ChatMessageText) {
-    return when (chatMessage.side) {
-      ChatSide.USER -> Message.user(chatMessage.content)
-      ChatSide.AGENT -> Message.model(chatMessage.content)
-      ChatSide.SYSTEM ->
-        null // TODO: Support SYSTEM role once we can decide on which system prompt to use.
-    }
-  }
-  return null
 }

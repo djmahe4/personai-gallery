@@ -62,7 +62,6 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
-import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.BufferedFadingMarkdownText
@@ -95,7 +94,6 @@ fun ResponsePanel(
   val scope = rememberCoroutineScope()
   val pagerState =
     rememberPagerState(initialPage = task.models.indexOf(model), pageCount = { task.models.size })
-  val accelerator = model.getStringConfigValue(key = ConfigKeys.ACCELERATOR, defaultValue = "")
   val context = LocalContext.current
 
   // Select the "response" tab when prompt template changes.
@@ -123,7 +121,7 @@ fun ResponsePanel(
     val curPageModel = task.models[pageIndex]
 
     val response =
-      uiState.responsesByModel[curPageModel.name]?.get(selectedPromptTemplateType.label) ?: ""
+      uiState.responsesByModel[curPageModel.name]?.get(selectedPromptTemplateType.name) ?: ""
 
     if (initializing) {
       Box(
@@ -141,7 +139,7 @@ fun ResponsePanel(
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(
-            "Response will appear here",
+            stringResource(R.string.prompt_lab_response_placeholder),
             modifier = Modifier.alpha(0.5f),
             style = MaterialTheme.typography.labelMedium,
           )

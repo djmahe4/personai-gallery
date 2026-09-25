@@ -130,7 +130,6 @@ import com.google.ai.edge.gallery.common.rotateBitmap
 import com.google.ai.edge.gallery.data.MAX_AUDIO_CLIP_COUNT
 import com.google.ai.edge.gallery.data.MAX_IMAGE_COUNT
 import com.google.ai.edge.gallery.data.MAX_IMAGE_COUNT_AI_CORE
-import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.SAMPLE_RATE
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.getTaskIconColor
@@ -181,6 +180,7 @@ fun MessageInputText(
   showAudioPicker: Boolean = false,
   showStopButtonWhenInProgress: Boolean = false,
   onImageLimitExceeded: () -> Unit = {},
+  onImagesIgnored: () -> Unit = {},
   onModelNotSupportImage: () -> Unit = {},
   onModelNotSupportAudio: () -> Unit = {},
 ) {
@@ -200,7 +200,7 @@ fun MessageInputText(
   val sensorObserver = remember { SensorObserver(context) }
 
   val updatePickedImages: (List<Bitmap>) -> Unit = { bitmaps ->
-    val isAiCore = modelManagerUiState.selectedModel.runtimeType == RuntimeType.AICORE
+    val isAiCore = modelManagerUiState.selectedModel.isAiCore
     var limit = MAX_IMAGE_COUNT
     if (isAiCore) {
       limit = MAX_IMAGE_COUNT_AI_CORE
@@ -216,6 +216,8 @@ fun MessageInputText(
       } else {
         if (isAiCore) {
           scope.launch(Dispatchers.Main) { onImageLimitExceeded() }
+        } else {
+          scope.launch(Dispatchers.Main) { onImagesIgnored() }
         }
         (pickedImages + bitmaps).take(maxAllowedForThisMessage)
       }
@@ -449,11 +451,11 @@ fun MessageInputText(
                     ) {
                       if (showImagePicker) {
                         val isImageLimitExceededForAiCore =
-                          modelManagerUiState.selectedModel.runtimeType == RuntimeType.AICORE &&
+                          modelManagerUiState.selectedModel.isAiCore &&
                             (imageCount + pickedImages.size) >= MAX_IMAGE_COUNT_AI_CORE
                         val enableAddImageMenuItems =
                           (imageCount + pickedImages.size) < MAX_IMAGE_COUNT
-                        val isImageSupported = modelManagerUiState.selectedModel.llmSupportImage
+                        val isImageSupported = modelManagerUiState.selectedModel.supportImage
                         val imageItemColors =
                           MenuDefaults.itemColors(
                             textColor =
@@ -471,7 +473,7 @@ fun MessageInputText(
                               horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                               Icon(Icons.Rounded.PhotoCamera, contentDescription = null)
-                              Text("Take a picture")
+                              Text(stringResource(R.string.take_a_picture))
                             }
                           },
                           enabled = enableAddImageMenuItems,
@@ -514,7 +516,7 @@ fun MessageInputText(
                               horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                               Icon(Icons.Rounded.Photo, contentDescription = null)
-                              Text("Pick from album")
+                              Text(stringResource(R.string.pick_from_album))
                             }
                           },
                           enabled = enableAddImageMenuItems,
@@ -545,7 +547,7 @@ fun MessageInputText(
                       if (showAudioPicker) {
                         val enableRecordAudioClipMenuItems =
                           (audioClipMessageCount + pickedAudioClips.size) < MAX_AUDIO_CLIP_COUNT
-                        val isAudioSupported = modelManagerUiState.selectedModel.llmSupportAudio
+                        val isAudioSupported = modelManagerUiState.selectedModel.supportAudio
                         val audioItemColors =
                           MenuDefaults.itemColors(
                             textColor =
@@ -562,7 +564,7 @@ fun MessageInputText(
                               horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                               Icon(Icons.Rounded.Mic, contentDescription = null)
-                              Text("Record audio clip")
+                              Text(stringResource(R.string.media_picker_record_audio))
                             }
                           },
                           enabled = enableRecordAudioClipMenuItems,
@@ -600,7 +602,7 @@ fun MessageInputText(
                               horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                               Icon(Icons.Rounded.AudioFile, contentDescription = null)
-                              Text("Pick wav file")
+                              Text(stringResource(R.string.media_picker_pick_wav))
                             }
                           },
                           enabled = enableRecordAudioClipMenuItems,
@@ -641,7 +643,7 @@ fun MessageInputText(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                           ) {
                             Icon(Icons.Rounded.History, contentDescription = null)
-                            Text("Input history")
+                            Text(stringResource(R.string.input_history))
                           }
                         },
                         onClick = {

@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -85,6 +86,7 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
@@ -93,7 +95,6 @@ import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.ui.common.chat.MessageBubbleShape
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.bodyLargeNarrow
 import com.google.ai.edge.gallery.ui.theme.customColors
@@ -101,7 +102,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val promptTemplateTypes: List<PromptTemplateType> = PromptTemplateType.entries
-private val TAB_TITLES = PromptTemplateType.entries.map { it.label }
 private val ICON_BUTTON_SIZE = 42.dp
 
 const val FULL_PROMPT_SWITCH_KEY = "full_prompt"
@@ -118,7 +118,6 @@ fun PromptTemplatesPanel(
 ) {
   val scope = rememberCoroutineScope()
   val uiState by viewModel.uiState.collectAsState()
-  val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedPromptTemplateType = uiState.selectedPromptTemplateType
   val inProgress = uiState.inProgress
   var selectedTabIndex by remember { mutableIntStateOf(0) }
@@ -136,12 +135,12 @@ fun PromptTemplatesPanel(
   val focusManager = LocalFocusManager.current
   val interactionSource = remember { MutableInteractionSource() }
   val expandedStates = remember { mutableStateMapOf<String, Boolean>() }
-  val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[model.name]
+  val initStatus by model.initStatusFlow.collectAsState()
 
   // Update input editor values when prompt template changes.
   LaunchedEffect(selectedPromptTemplateType) {
     for (config in selectedPromptTemplateType.config.inputEditors) {
-      inputEditorValues[config.label] = config.defaultOption
+      inputEditorValues[config.key] = config.defaultOptionKey
     }
     expandedStates.clear()
   }
@@ -153,7 +152,7 @@ fun PromptTemplatesPanel(
   Column(modifier = modifier) {
     // Scrollable tab row for all prompt templates.
     PrimaryScrollableTabRow(selectedTabIndex = selectedTabIndex) {
-      TAB_TITLES.forEachIndexed { index, title ->
+      promptTemplateTypes.forEachIndexed { index, templateType ->
         Tab(
           selected = selectedTabIndex == index,
           enabled = !inProgress,
@@ -171,7 +170,7 @@ fun PromptTemplatesPanel(
           },
           text = {
             Text(
-              text = title,
+              text = stringResource(templateType.labelRes),
               modifier = Modifier.alpha(if (inProgress) 0.5f else 1f),
               color =
                 if (selectedTabIndex == index) MaterialTheme.colorScheme.primary
@@ -200,7 +199,7 @@ fun PromptTemplatesPanel(
               PromptTemplateInputEditorType.SINGLE_SELECT ->
                 SingleSelectButton(
                   config = inputEditor as PromptTemplateSingleSelectInputEditor,
-                  onSelected = { option -> inputEditorValues[inputEditor.label] = option },
+                  onSelected = { optionKey -> inputEditorValues[inputEditor.key] = optionKey },
                 )
             }
           }
@@ -247,7 +246,7 @@ fun PromptTemplatesPanel(
                   disabledContainerColor = Color.Transparent,
                 ),
               textStyle = bodyLargeNarrow,
-              placeholder = { Text("Enter content") },
+              placeholder = { Text(stringResource(R.string.prompt_lab_enter_content_placeholder)) },
               modifier =
                 Modifier.padding(bottom = 40.dp).focusRequester(focusRequester).semantics {
                   contentDescription = cdContentInput
@@ -267,20 +266,21 @@ fun PromptTemplatesPanel(
             selectedPromptTemplateType != PromptTemplateType.FREE_FORM &&
               curTextInputContent.isNotEmpty()
           ) {
+            val isFullPromptOn = inputEditorValues[FULL_PROMPT_SWITCH_KEY] as Boolean
             Row(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(4.dp),
               modifier =
                 Modifier.clip(CircleShape)
                   .background(
-                    if (inputEditorValues[FULL_PROMPT_SWITCH_KEY] as Boolean)
-                      MaterialTheme.colorScheme.secondaryContainer
+                    if (isFullPromptOn) MaterialTheme.colorScheme.secondaryContainer
                     else MaterialTheme.customColors.agentBubbleBgColor
                   )
-                  .clickable {
-                    inputEditorValues[FULL_PROMPT_SWITCH_KEY] =
-                      !(inputEditorValues[FULL_PROMPT_SWITCH_KEY] as Boolean)
-                  }
+                  .toggleable(
+                    value = isFullPromptOn,
+                    role = Role.Switch,
+                    onValueChange = { inputEditorValues[FULL_PROMPT_SWITCH_KEY] = it },
+                  )
                   .height(40.dp)
                   .border(
                     width = 1.dp,
@@ -289,7 +289,7 @@ fun PromptTemplatesPanel(
                   )
                   .padding(horizontal = 12.dp),
             ) {
-              if (inputEditorValues[FULL_PROMPT_SWITCH_KEY] as Boolean) {
+              if (isFullPromptOn) {
                 Icon(
                   imageVector = Icons.Rounded.Visibility,
                   contentDescription = null,
@@ -302,7 +302,10 @@ fun PromptTemplatesPanel(
                   modifier = Modifier.size(FilterChipDefaults.IconSize).alpha(0.3f),
                 )
               }
-              Text("Preview prompt", style = MaterialTheme.typography.labelMedium)
+              Text(
+                stringResource(R.string.prompt_lab_preview_prompt),
+                style = MaterialTheme.typography.labelMedium,
+              )
             }
           }
 
@@ -359,8 +362,7 @@ fun PromptTemplatesPanel(
             )
           }
 
-          val modelInitializing =
-            modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZING
+          val modelInitializing = initStatus is Model.InitializationStatus.Initializing
           if (inProgress && !modelInitializing && !uiState.preparing) {
             IconButton(
               onClick = { onStopButtonClicked(model) },
@@ -416,7 +418,7 @@ fun PromptTemplatesPanel(
       Column(modifier = Modifier.padding(bottom = 16.dp)) {
         // Title
         Text(
-          "Select an example",
+          stringResource(R.string.prompt_lab_select_example_title),
           modifier = Modifier.fillMaxWidth().padding(16.dp),
           style = MaterialTheme.typography.titleLarge,
         )

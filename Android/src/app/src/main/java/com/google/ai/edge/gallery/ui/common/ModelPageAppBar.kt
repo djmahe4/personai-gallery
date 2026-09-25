@@ -16,6 +16,7 @@
 
 package com.google.ai.edge.gallery.ui.common
 
+import android.os.Bundle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,17 +47,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
+import com.google.ai.edge.gallery.BuildConfig
+import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.customtasks.agentchat.agentSkillTopK
+import com.google.ai.edge.gallery.customtasks.agentchat.agentSkillTopKAdjusted
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelCapability
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
-import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.convertValueToTargetType
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
+import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+
+import com.google.ai.edge.litertlm.Capabilities
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,11 +90,9 @@ fun ModelPageAppBar(
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val context = LocalContext.current
   val curDownloadStatus = modelManagerUiState.modelDownloadStatus[model.name]
-  val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[model.name]
-  val isModelInitializing =
-    modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZING
-  val isModelInitialized =
-    modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZED
+  val initStatus by model.initStatusFlow.collectAsState()
+  val isModelInitializing = initStatus is Model.InitializationStatus.Initializing
+  val isModelInitialized = initStatus is Model.InitializationStatus.Initialized
 
   CenterAlignedTopAppBar(
     title = {
@@ -104,12 +108,10 @@ fun ModelPageAppBar(
           val tintColor =
             if (useThemeColor) MaterialTheme.colorScheme.onSurface
             else getTaskIconColor(task = task)
-          Icon(
-            task.icon ?: ImageVector.vectorResource(task.iconVectorResourceId!!),
-            tint = tintColor,
-            modifier = Modifier.size(24.dp),
-            contentDescription = null,
-          )
+          val icon = task.icon ?: task.iconVectorResourceId?.let { ImageVector.vectorResource(it) }
+          if (icon != null) {
+            Icon(icon, tint = tintColor, modifier = Modifier.size(24.dp), contentDescription = null)
+          }
           Text(task.label, style = MaterialTheme.typography.titleMedium, color = tintColor)
         }
 
@@ -198,7 +200,7 @@ fun ModelPageAppBar(
     var supportsSpeculativeDecoding = false
     // Check if the model file supports speculative decoding.
     try {
-      com.google.ai.edge.litertlm.Capabilities(model.getPath(context)).use {
+      Capabilities(model.getPath(context)).use {
         supportsSpeculativeDecoding = it.hasSpeculativeDecodingSupport()
       }
     } catch (e: Exception) {
@@ -211,7 +213,7 @@ fun ModelPageAppBar(
       modelConfigs.removeIf { it.key == ConfigKeys.ENABLE_SPECULATIVE_DECODING }
     }
     ConfigDialog(
-      title = "Configurations",
+      title = stringResource(R.string.config_dialog_title),
       configs = modelConfigs,
       initialValues = model.configValues,
       onDismissed = { showConfigDialog = false },
@@ -243,8 +245,22 @@ fun ModelPageAppBar(
             break
           }
         }
+        val systemPromptChanged = newSystemPrompt != oldSystemPrompt
+
+        if (!same || systemPromptChanged) {
+          firebaseAnalytics?.logEvent(
+            GalleryEvent.MODEL_CONFIG_CHANGE.id,
+            Bundle().apply {
+              putString("model_id", model.name)
+              putString("capability_name", task.id)
+              putString("model_version", model.downloadInfo.version)
+              putString("app_version", BuildConfig.VERSION_NAME)
+            },
+          )
+        }
+
         if (same) {
-          if (newSystemPrompt != oldSystemPrompt) {
+          if (systemPromptChanged) {
             onSystemPromptChanged(newSystemPrompt)
           }
           return@ConfigDialog
@@ -254,6 +270,10 @@ fun ModelPageAppBar(
         val oldConfigValues = model.configValues
         model.prevConfigValues = oldConfigValues
         model.configValues = curConfigValues
+        if (task.id == BuiltInTaskId.LLM_AGENT_CHAT) {
+          model.agentSkillTopKAdjusted = true
+          model.agentSkillTopK = curConfigValues[ConfigKeys.TOPK.label]
+        }
         modelManagerViewModel.updateConfigValuesUpdateTrigger()
 
         if (!task.handleModelConfigChangesInTask) {
@@ -277,8 +297,7 @@ fun ModelPageAppBar(
         }
       },
       // AICore doesn't support system prompt yet.
-      showSystemPromptEditorTab =
-        allowEditingSystemPrompt && model.runtimeType != RuntimeType.AICORE,
+      showSystemPromptEditorTab = allowEditingSystemPrompt && !model.isAiCore,
       defaultSystemPrompt = task.defaultSystemPrompt,
       curSystemPrompt = curSystemPrompt,
     )

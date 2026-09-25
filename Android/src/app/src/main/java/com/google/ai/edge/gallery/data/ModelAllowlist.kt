@@ -30,6 +30,7 @@ data class DefaultConfig(
   @SerializedName("temperature") val temperature: Float?,
   @SerializedName("accelerators") val accelerators: String?,
   @SerializedName("visionAccelerator") val visionAccelerator: String?,
+  @SerializedName("audioAccelerator") val audioAccelerator: String? = null,
   @SerializedName("maxContextLength") val maxContextLength: Int?,
   @SerializedName("maxTokens") val maxTokens: Int?,
 )
@@ -50,7 +51,7 @@ data class AllowedModel(
   val commitHash: String,
   val description: String,
   val sizeInBytes: Long,
-  val defaultConfig: DefaultConfig,
+  val defaultConfig: DefaultConfig? = null,
   val taskTypes: List<String>,
   val disabled: Boolean? = null,
   val llmSupportImage: Boolean? = null,
@@ -71,6 +72,8 @@ data class AllowedModel(
   val capabilityToTaskTypes: Map<ModelCapability, List<String>>? = null,
   val updatableModelFiles: List<ModelFile>? = null,
   val updateInfo: String? = null,
+  val extraDataFiles: List<ModelDataFile>? = null,
+  val metadata: ModelMetadata? = null,
 ) {
   fun toModel(): Model {
     // Construct HF download url.
@@ -104,54 +107,43 @@ data class AllowedModel(
         taskTypes.contains(BuiltInTaskId.LLM_MOBILE_ACTIONS) ||
         taskTypes.contains(BuiltInTaskId.LLM_TINY_GARDEN)
     var configs: MutableList<Config> = mutableListOf()
-    var llmMaxToken = 1024
+    var llmMaxToken = DEFAULT_MAX_TOKEN
     var llmMaxContextLength: Int? = null
     var accelerators: List<Accelerator> = DEFAULT_ACCELERATORS
     var visionAccelerator: Accelerator = DEFAULT_VISION_ACCELERATOR
 
     var finalDescription = description
-    var acceleratorsStr = defaultConfig.accelerators
+    var acceleratorsStr = defaultConfig?.accelerators
 
     if (isPixelDevice()) {
       finalDescription = description.replace(Regex("\\bNPU\\b"), "TPU")
       acceleratorsStr = acceleratorsStr?.replace(Regex("\\bnpu\\b"), "tpu")
     }
 
+    if (acceleratorsStr != null) {
+      val items = acceleratorsStr.split(",")
+      val parsedAccelerators = mutableListOf<Accelerator>()
+      for (item in items) {
+        Accelerator.fromLabel(item.trim())?.let { parsedAccelerators.add(it) }
+      }
+      // Remove GPU from pixel 10 devices.
+      if (isPixel10()) {
+        parsedAccelerators.remove(Accelerator.GPU)
+      }
+      if (parsedAccelerators.isNotEmpty()) {
+        accelerators = parsedAccelerators
+      }
+    }
+
+    Accelerator.fromLabel(defaultConfig?.visionAccelerator)?.let { visionAccelerator = it }
+    val audioAccelerator = Accelerator.fromLabel(defaultConfig?.audioAccelerator)
+
     if (isLlmModel) {
-      val defaultTopK: Int = defaultConfig.topK ?: DEFAULT_TOPK
-      val defaultTopP: Float = defaultConfig.topP ?: DEFAULT_TOPP
-      val defaultTemperature: Float = defaultConfig.temperature ?: DEFAULT_TEMPERATURE
-      llmMaxToken = defaultConfig.maxTokens ?: 1024
-      llmMaxContextLength = defaultConfig.maxContextLength
-      if (acceleratorsStr != null) {
-        val items = acceleratorsStr.split(",")
-        accelerators = mutableListOf()
-        for (item in items) {
-          if (item == "cpu") {
-            accelerators.add(Accelerator.CPU)
-          } else if (item == "gpu") {
-            accelerators.add(Accelerator.GPU)
-          } else if (item == "npu") {
-            accelerators.add(Accelerator.NPU)
-          } else if (item == "tpu") {
-            accelerators.add(Accelerator.TPU)
-          }
-        }
-        // Remove GPU from pixel 10 devices.
-        if (isPixel10()) {
-          accelerators.remove(Accelerator.GPU)
-        }
-      }
-      if (defaultConfig.visionAccelerator != null) {
-        val accelerator = defaultConfig.visionAccelerator
-        if (accelerator == "cpu") {
-          visionAccelerator = Accelerator.CPU
-        } else if (accelerator == "gpu") {
-          visionAccelerator = Accelerator.GPU
-        } else if (accelerator == "npu") {
-          visionAccelerator = Accelerator.NPU
-        }
-      }
+      val defaultTopK: Int = defaultConfig?.topK ?: DEFAULT_TOPK
+      val defaultTopP: Float = defaultConfig?.topP ?: DEFAULT_TOPP
+      val defaultTemperature: Float = defaultConfig?.temperature ?: DEFAULT_TEMPERATURE
+      llmMaxToken = defaultConfig?.maxTokens?.takeIf { it > 0 } ?: DEFAULT_MAX_TOKEN
+      llmMaxContextLength = defaultConfig?.maxContextLength
       val npuOnly =
         accelerators.size == 1 &&
           (accelerators[0] == Accelerator.NPU || accelerators[0] == Accelerator.TPU)
@@ -184,7 +176,7 @@ data class AllowedModel(
           .toMutableList()
     }
 
-    var learnMoreUrl = "https://huggingface.co/${modelId}"
+    var learnMoreUrl = if (modelId.isEmpty()) "" else "https://huggingface.co/${modelId}"
 
     if (runtimeType == RuntimeType.AICORE) {
       downloadUrl = ""
@@ -192,44 +184,56 @@ data class AllowedModel(
     }
 
     // Misc.
-    var showBenchmarkButton = true
     var showRunAgainButton = true
     if (isLlmModel) {
-      showBenchmarkButton = false
       showRunAgainButton = false
     }
+    val downloadInfo =
+      ModelDownloadInfo(
+        url = downloadUrl,
+        sizeInBytes = sizeInBytes,
+        downloadFileName = downloadedFileName,
+        version = version,
+        extraDataFiles = extraDataFiles ?: emptyList(),
+        localModelFilePathOverride = localModelFilePathOverride ?: "",
+        updatableModelFiles = updatableModelFiles ?: emptyList(),
+        updateInfo = updateInfo ?: "",
+      )
+    val llmProfile =
+      if (isLlmModel) {
+        LlmProfile(
+          supportTinyGarden = llmSupportTinyGarden == true,
+          supportMobileActions = llmSupportMobileActions == true,
+          maxTokens = llmMaxToken,
+        )
+      } else {
+        null
+      }
     return Model(
       name = name,
-      version = version,
       info = finalDescription,
-      url = downloadUrl,
-      sizeInBytes = sizeInBytes,
       minDeviceMemoryInGb = minDeviceMemoryInGb,
       configs = configs,
-      downloadFileName = downloadedFileName,
-      showBenchmarkButton = showBenchmarkButton,
       showRunAgainButton = showRunAgainButton,
       learnMoreUrl = learnMoreUrl,
-      llmSupportImage = llmSupportImage == true,
-      llmSupportAudio = llmSupportAudio == true,
-      llmSupportTinyGarden = llmSupportTinyGarden == true,
-      llmSupportMobileActions = llmSupportMobileActions == true,
+      downloadInfo = downloadInfo,
+      backendSpec =
+        BackendSpec(
+          runtimeType = runtimeType ?: RuntimeType.LITERT_LM,
+          aicoreReleaseStage = aicoreReleaseStage,
+          aicorePreference = aicorePreference,
+          accelerators = accelerators,
+          visionAccelerator = visionAccelerator,
+          audioAccelerator = audioAccelerator,
+        ),
+      hierarchy = ModelHierarchy(parentModelName = parentModelName, variantLabel = variantLabel),
+      llmProfile = llmProfile,
+      supportImage = llmSupportImage == true,
+      supportAudio = llmSupportAudio == true,
       capabilities = capabilities ?: emptyList(),
-      llmMaxToken = llmMaxToken,
-      accelerators = accelerators,
-      visionAccelerator = visionAccelerator,
-      bestForTaskIds = bestForTaskTypes ?: listOf(),
-      localModelFilePathOverride = localModelFilePathOverride ?: "",
-      isLlm = isLlmModel,
-      runtimeType = runtimeType ?: RuntimeType.LITERT_LM,
-      aicoreReleaseStage = aicoreReleaseStage,
-      aicorePreference = aicorePreference,
-      parentModelName = parentModelName,
-      variantLabel = variantLabel,
       capabilityToTaskTypes = capabilityToTaskTypes ?: emptyMap(),
-      updatableModelFiles = updatableModelFiles ?: listOf(),
-      updateInfo = updateInfo ?: "",
-      latestModelFile = ModelFile(fileName = downloadedFileName, commitHash = version),
+      bestForTaskIds = bestForTaskTypes ?: listOf(),
+      metadata = metadata ?: ModelMetadata(),
     )
   }
 
@@ -254,4 +258,6 @@ data class DeviceRequirements(
 data class ModelAllowlist(
   val models: List<AllowedModel>,
   @SerializedName("aicoreRequirements") val aicoreRequirements: DeviceRequirements? = null,
+  /** Flag overrides configured remotely via the allowlist. */
+  @SerializedName("flags") val flags: Map<String, Boolean> = emptyMap(),
 )

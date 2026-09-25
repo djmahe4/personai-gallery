@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -61,125 +63,96 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.common.getModelStorageDir
 import com.google.ai.edge.gallery.common.isPixel10
 import com.google.ai.edge.gallery.data.Accelerator
-import com.google.ai.edge.gallery.data.BooleanSwitchConfig
 import com.google.ai.edge.gallery.data.Config
 import com.google.ai.edge.gallery.data.ConfigKey
 import com.google.ai.edge.gallery.data.ConfigKeys
-import com.google.ai.edge.gallery.data.DEFAULT_MAX_TOKEN
-import com.google.ai.edge.gallery.data.DEFAULT_TEMPERATURE
-import com.google.ai.edge.gallery.data.DEFAULT_TOPK
-import com.google.ai.edge.gallery.data.DEFAULT_TOPP
 import com.google.ai.edge.gallery.data.IMPORTS_DIR
-import com.google.ai.edge.gallery.data.LabelConfig
-import com.google.ai.edge.gallery.data.NumberSliderConfig
-import com.google.ai.edge.gallery.data.SegmentedButtonConfig
-import com.google.ai.edge.gallery.data.ValueType
-import com.google.ai.edge.gallery.data.convertValueToTargetType
+import com.google.ai.edge.gallery.data.ModelUtils
+import com.google.ai.edge.gallery.huggingface.HuggingFaceApiClient
+import com.google.ai.edge.gallery.huggingface.extractHfUrlInfo
 import com.google.ai.edge.gallery.proto.ImportedModel
-import com.google.ai.edge.gallery.proto.LlmConfig
+import com.google.ai.edge.gallery.proto.importedModel
 import com.google.ai.edge.gallery.ui.common.ConfigEditorsPanel
 import com.google.ai.edge.gallery.ui.common.ensureValidFileName
 import com.google.ai.edge.gallery.ui.common.humanReadableSize
+import com.google.ai.edge.gallery.ui.common.isHttpOrHttps
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "AGModelImportDialog"
 
 private val SUPPORTED_ACCELERATORS: List<Accelerator> =
   if (isPixel10()) {
-    listOf(Accelerator.CPU, Accelerator.NPU)
+    val accelerators = mutableListOf(Accelerator.CPU, Accelerator.NPU)
+    accelerators.toList()
   } else {
     listOf(Accelerator.CPU, Accelerator.GPU, Accelerator.NPU)
   }
 
-private val IMPORT_CONFIGS_LLM: List<Config> =
-  listOf(
-    LabelConfig(key = ConfigKeys.NAME),
-    LabelConfig(key = ConfigKeys.MODEL_TYPE),
-    NumberSliderConfig(
-      key = ConfigKeys.DEFAULT_MAX_TOKENS,
-      sliderMin = 100f,
-      sliderMax = 4096f,
-      defaultValue = DEFAULT_MAX_TOKEN.toFloat(),
-      valueType = ValueType.INT,
-    ),
-    NumberSliderConfig(
-      key = ConfigKeys.DEFAULT_TOPK,
-      sliderMin = 1f,
-      sliderMax = 100f,
-      defaultValue = DEFAULT_TOPK.toFloat(),
-      valueType = ValueType.INT,
-    ),
-    NumberSliderConfig(
-      key = ConfigKeys.DEFAULT_TOPP,
-      sliderMin = 0.0f,
-      sliderMax = 1.0f,
-      defaultValue = DEFAULT_TOPP,
-      valueType = ValueType.FLOAT,
-    ),
-    NumberSliderConfig(
-      key = ConfigKeys.DEFAULT_TEMPERATURE,
-      sliderMin = 0.0f,
-      sliderMax = 2.0f,
-      defaultValue = DEFAULT_TEMPERATURE,
-      valueType = ValueType.FLOAT,
-    ),
-    BooleanSwitchConfig(key = ConfigKeys.SUPPORT_IMAGE, defaultValue = false),
-    BooleanSwitchConfig(key = ConfigKeys.SUPPORT_AUDIO, defaultValue = false),
-    BooleanSwitchConfig(key = ConfigKeys.SUPPORT_TINY_GARDEN, defaultValue = false),
-    BooleanSwitchConfig(key = ConfigKeys.SUPPORT_MOBILE_ACTIONS, defaultValue = false),
-    BooleanSwitchConfig(key = ConfigKeys.SUPPORT_THINKING, defaultValue = false),
-    BooleanSwitchConfig(key = ConfigKeys.SUPPORT_SPECULATIVE_DECODING, defaultValue = false),
-    SegmentedButtonConfig(
-      key = ConfigKeys.COMPATIBLE_ACCELERATORS,
-      defaultValue = SUPPORTED_ACCELERATORS[0].label,
-      options = SUPPORTED_ACCELERATORS.map { it.label },
-      allowMultiple = true,
-    ),
-  )
-
 @Composable
 fun ModelImportDialog(
   uri: Uri,
+  huggingFaceApiClient: HuggingFaceApiClient,
   onDismiss: () -> Unit,
   onDone: (ImportedModel) -> Unit,
   defaultValues: Map<ConfigKey, Any> = emptyMap(),
+  accessToken: String? = null,
 ) {
   val context = LocalContext.current
   val info = remember { getFileSizeAndDisplayNameFromUri(context = context, uri = uri) }
   var fileSize by remember { mutableLongStateOf(info.first) }
   val fileName by remember { mutableStateOf(ensureValidFileName(info.second)) }
+  val importConfigs =
+    remember(uri) {
+      Config.createLlmImportConfigs(
+        accelerators = SUPPORTED_ACCELERATORS,
+        isForTestOnly = ModelUtils.isImportedUrlForTestOnly(uri.toString()),
+      )
+    }
+
+  // Indicates that the file size is still being fetched and we should disable the import button
+  // until it's done.
+  var isFetchingSize by remember { mutableStateOf(isHttpOrHttps(uri)) }
 
   LaunchedEffect(uri) {
-    if (uri.scheme == "http" || uri.scheme == "https") {
-      kotlinx.coroutines.withContext(Dispatchers.IO) {
-        try {
-          // Get the file size from the download url.
-          val downloadUrl = getDownloadUrl(uri)
-          val connection = java.net.URL(downloadUrl).openConnection()
-          connection.connect()
-          val size = connection.contentLengthLong
-          if (size > 0) {
-            fileSize = size
-          }
-          connection.getInputStream().close()
-        } catch (e: Exception) {
-          e.printStackTrace()
+    if (isHttpOrHttps(uri)) {
+      isFetchingSize = true
+      try {
+        val downloadUrl = getDownloadUrl(uri)
+        val size =
+          fetchFileSize(
+            urlStr = downloadUrl,
+            huggingFaceAccessToken = accessToken,
+            hfApiClient = huggingFaceApiClient,
+          )
+        if (size > 0L) {
+          fileSize = size
         }
+      } catch (e: Exception) {
+        if (e is CancellationException) throw e
+        Log.e(TAG, "Error fetching file size for $uri", e)
+      } finally {
+        isFetchingSize = false
       }
     }
   }
 
   val initialValues: Map<String, Any> = remember {
     mutableMapOf<String, Any>().apply {
-      for (config in IMPORT_CONFIGS_LLM) {
+      for (config in importConfigs) {
         put(config.key.label, config.defaultValue)
       }
       put(ConfigKeys.NAME.label, fileName)
@@ -214,7 +187,7 @@ fun ModelImportDialog(
       ) {
         // Title.
         Text(
-          "Import Model",
+          stringResource(R.string.import_model),
           style = MaterialTheme.typography.titleLarge,
           modifier = Modifier.padding(bottom = 8.dp),
         )
@@ -224,7 +197,7 @@ fun ModelImportDialog(
           verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
           // Default configs for users to set.
-          ConfigEditorsPanel(configs = IMPORT_CONFIGS_LLM, values = values)
+          ConfigEditorsPanel(configs = importConfigs, values = values)
         }
 
         // Button row.
@@ -233,104 +206,39 @@ fun ModelImportDialog(
           horizontalArrangement = Arrangement.End,
         ) {
           // Cancel button.
-          TextButton(onClick = { onDismiss() }) { Text("Cancel") }
+          TextButton(onClick = { onDismiss() }) { Text(stringResource(R.string.cancel)) }
 
           // Import button
           Button(
+            // Disable the import button while fetching file size for URI.
+            enabled = !isFetchingSize,
             onClick = {
-              val supportedAccelerators =
-                (convertValueToTargetType(
-                    value = values.get(ConfigKeys.COMPATIBLE_ACCELERATORS.label)!!,
-                    valueType = ValueType.STRING,
-                  )
-                    as String)
-                  .split(",")
-              val defaultMaxTokens =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.DEFAULT_MAX_TOKENS.label)!!,
-                  valueType = ValueType.INT,
-                )
-                  as Int
-              val defaultTopk =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.DEFAULT_TOPK.label)!!,
-                  valueType = ValueType.INT,
-                )
-                  as Int
-              val defaultTopp =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.DEFAULT_TOPP.label)!!,
-                  valueType = ValueType.FLOAT,
-                )
-                  as Float
-              val defaultTemperature =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.DEFAULT_TEMPERATURE.label)!!,
-                  valueType = ValueType.FLOAT,
-                )
-                  as Float
-              val supportImage =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.SUPPORT_IMAGE.label)!!,
-                  valueType = ValueType.BOOLEAN,
-                )
-                  as Boolean
-              val supportAudio =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.SUPPORT_AUDIO.label)!!,
-                  valueType = ValueType.BOOLEAN,
-                )
-                  as Boolean
-              val supportTinyGarden =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.SUPPORT_TINY_GARDEN.label)!!,
-                  valueType = ValueType.BOOLEAN,
-                )
-                  as Boolean
-              val supportMobileActions =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.SUPPORT_MOBILE_ACTIONS.label)!!,
-                  valueType = ValueType.BOOLEAN,
-                )
-                  as Boolean
-              val supportThinking =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.SUPPORT_THINKING.label)!!,
-                  valueType = ValueType.BOOLEAN,
-                )
-                  as Boolean
-              val supportSpeculativeDecoding =
-                convertValueToTargetType(
-                  value = values.get(ConfigKeys.SUPPORT_SPECULATIVE_DECODING.label)!!,
-                  valueType = ValueType.BOOLEAN,
-                )
-                  as Boolean
               val downloadUrl = getDownloadUrl(uri)
-              val importedModel: ImportedModel =
-                ImportedModel.newBuilder()
-                  .setFileName(fileName)
-                  .setFileSize(fileSize)
-                  .setUrl(if (uri.scheme == "http" || uri.scheme == "https") downloadUrl else "")
-                  .setLlmConfig(
-                    LlmConfig.newBuilder()
-                      .addAllCompatibleAccelerators(supportedAccelerators)
-                      .setDefaultMaxTokens(defaultMaxTokens)
-                      .setDefaultTopk(defaultTopk)
-                      .setDefaultTopp(defaultTopp)
-                      .setDefaultTemperature(defaultTemperature)
-                      .setSupportImage(supportImage)
-                      .setSupportAudio(supportAudio)
-                      .setSupportMobileActions(supportMobileActions)
-                      .setSupportThinking(supportThinking)
-                      .setSupportTinyGarden(supportTinyGarden)
-                      .setSupportSpeculativeDecoding(supportSpeculativeDecoding)
-                      .build()
-                  )
-                  .build()
+              val importedModel = importedModel {
+                this.fileName = fileName
+                this.fileSize = fileSize
+                this.url = if (isHttpOrHttps(uri)) downloadUrl else ""
+                this.llmConfig = ModelUtils.createImportedLlmConfig(values)
+              }
+
               onDone(importedModel)
-            }
+            },
           ) {
-            Text("Import")
+            if (isFetchingSize) {
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                CircularProgressIndicator(
+                  modifier = Modifier.size(16.dp),
+                  strokeWidth = 2.dp,
+                  color = MaterialTheme.colorScheme.onPrimary,
+                )
+                Text(stringResource(R.string.import_action))
+              }
+            } else {
+              Text(stringResource(R.string.import_action))
+            }
           }
         }
       }
@@ -375,7 +283,7 @@ fun ModelImportingDialog(
       ) {
         // Title.
         Text(
-          "Import Model",
+          stringResource(R.string.import_model),
           style = MaterialTheme.typography.titleLarge,
           modifier = Modifier.padding(bottom = 8.dp),
         )
@@ -417,7 +325,7 @@ fun ModelImportingDialog(
             )
           }
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Button(onClick = { onDismiss() }) { Text("Close") }
+            Button(onClick = { onDismiss() }) { Text(stringResource(R.string.close)) }
           }
         }
       }
@@ -438,7 +346,7 @@ private fun importModel(
   // TODO: handle error.
   coroutineScope.launch(Dispatchers.IO) {
     // If it's a model from the web, we don't need to copy the file over.
-    if (uri.scheme == "http" || uri.scheme == "https") {
+    if (isHttpOrHttps(uri)) {
       Log.d(TAG, "importing web model from $uri. File name: $fileName. File size: $fileSize")
       // Simulate a quick progress animation to show the user it's being added
       // for (i in 1..10) {
@@ -446,7 +354,7 @@ private fun importModel(
       //   onProgress(i.toFloat() / 10f)
       // }
       Log.d(TAG, "import done for web model")
-      onDone()
+      withContext(Dispatchers.Main) { onDone() }
       return@launch
     }
 
@@ -454,14 +362,16 @@ private fun importModel(
     val decodedUri = URLDecoder.decode(uri.toString(), StandardCharsets.UTF_8.name())
     Log.d(TAG, "importing model from $decodedUri. File name: $fileName. File size: $fileSize")
 
-    // Create <app_external_dir>/imports if not exist.
-    val importsDir = File(context.getExternalFilesDir(null), IMPORTS_DIR)
+    val modelsDir = getModelStorageDir(context)
+
+    // Create <models_dir>/imports if not exist.
+    val importsDir = File(modelsDir, IMPORTS_DIR)
     if (!importsDir.exists()) {
       importsDir.mkdirs()
     }
 
     // Import by copying the file over.
-    val outputFile = File(context.getExternalFilesDir(null), "$IMPORTS_DIR/$fileName")
+    val outputFile = File(modelsDir, "$IMPORTS_DIR/$fileName")
     val outputStream = FileOutputStream(outputFile)
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
     var bytesRead: Int
@@ -471,6 +381,7 @@ private fun importModel(
     try {
       if (inputStream != null) {
         while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+          ensureActive()
           outputStream.write(buffer, 0, bytesRead)
           importedBytes += bytesRead
 
@@ -485,22 +396,28 @@ private fun importModel(
           }
         }
       }
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
-      e.printStackTrace()
-      onError(e.message ?: "Failed to import")
+      Log.e(TAG, "Failed to import model", e)
+      withContext(Dispatchers.Main) {
+        onError(e.message ?: context.getString(R.string.failed_to_import))
+      }
       return@launch
     } finally {
       inputStream?.close()
       outputStream.close()
     }
     Log.d(TAG, "import done")
-    onProgress(1f)
-    onDone()
+    withContext(Dispatchers.Main) {
+      onProgress(1f)
+      onDone()
+    }
   }
 }
 
 private fun getFileSizeAndDisplayNameFromUri(context: Context, uri: Uri): Pair<Long, String> {
-  if (uri.scheme == "http" || uri.scheme == "https") {
+  if (isHttpOrHttps(uri)) {
     return Pair(0L, uri.lastPathSegment ?: "")
   }
   val contentResolver = context.contentResolver
@@ -534,4 +451,93 @@ private fun getDownloadUrl(uri: Uri): String {
   } else {
     uri.toString()
   }
+}
+
+/**
+ * Fetches the total file size of a remote model URL without downloading the full payload.
+ *
+ * For Hugging Face URLs, queries the Hugging Face REST API via [HuggingFaceApiClient]. For
+ * non-Hugging Face HTTP URLs, probes the endpoint directly via HTTP Range GET.
+ *
+ * @param urlStr Direct remote file URL to inspect.
+ * @param huggingFaceAccessToken Optional Bearer authentication token for Hugging Face.
+ * @return Total file size in bytes, or `0L` if size could not be determined.
+ */
+private suspend fun fetchFileSize(
+  urlStr: String,
+  huggingFaceAccessToken: String? = null,
+  hfApiClient: HuggingFaceApiClient,
+): Long =
+  withContext(Dispatchers.IO) {
+    if (HuggingFaceApiClient.isHuggingFaceUrl(urlStr)) {
+      return@withContext fetchHuggingFaceFileSize(
+        urlStr = urlStr,
+        huggingFaceAccessToken = huggingFaceAccessToken,
+        hfApiClient = hfApiClient,
+      )
+    }
+    return@withContext fetchHttpFileSize(urlStr)
+  }
+
+/** Fetches the file size using the Hugging Face API client. */
+private suspend fun fetchHuggingFaceFileSize(
+  urlStr: String,
+  huggingFaceAccessToken: String? = null,
+  hfApiClient: HuggingFaceApiClient,
+): Long {
+  val urlInfo = extractHfUrlInfo(urlStr)
+  val modelId = urlInfo.modelId
+  val fileName = urlInfo.fileName
+  if (modelId != null && fileName != null) {
+    try {
+      val size =
+        hfApiClient.getModelFileSize(modelId, fileName, accessToken = huggingFaceAccessToken)
+      if (size != null && size > 0L) {
+        return size
+      }
+    } catch (e: Exception) {
+      if (e is CancellationException) throw e
+      Log.w(TAG, "HuggingFaceApiClient lookup failed for $urlStr", e)
+    }
+  }
+  return 0L
+}
+
+/** Fetches the file size from a generic, non-Hugging-Face HTTP URL via Range GET. */
+private suspend fun fetchHttpFileSize(urlStr: String): Long {
+  val url = runCatching { URL(urlStr) }.getOrNull() ?: return 0L
+  val connection =
+    runCatching { url.openConnection() as HttpURLConnection }.getOrNull() ?: return 0L
+  connection.requestMethod = "GET"
+
+  // Request only the first 1 byte (bytes=0-0) to inspect file headers without downloading the
+  // entire payload.
+  connection.setRequestProperty("Range", "bytes=0-0")
+
+  try {
+    connection.connect()
+
+    val isResponseOk = connection.responseCode in 200..299
+    if (isResponseOk) {
+      // HTTP 206 Partial Content returns "Content-Range: bytes 0-0/<total_bytes>".
+      val contentRange = connection.getHeaderField("Content-Range")
+      if (contentRange != null) {
+        val totalFromRange = contentRange.substringAfter("/").trim().toLongOrNull()
+        if (totalFromRange != null && totalFromRange > 0L) {
+          return totalFromRange
+        }
+      }
+      // Fallback to Content-Length if the server returned HTTP 200 OK without byte ranges.
+      val contentLength = connection.contentLengthLong
+      if (contentLength > 0L) {
+        return contentLength
+      }
+    }
+  } catch (e: Exception) {
+    if (e is CancellationException) throw e
+    Log.w(TAG, "HTTP probe failed for $urlStr", e)
+  } finally {
+    connection.disconnect()
+  }
+  return 0L
 }

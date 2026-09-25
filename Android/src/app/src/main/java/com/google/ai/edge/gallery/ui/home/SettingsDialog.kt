@@ -20,6 +20,8 @@ import com.google.android.gms.oss.licenses.OssLicensesMenuActivity
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.annotation.StringRes
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -50,6 +52,7 @@ import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -69,6 +72,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.google.ai.edge.gallery.BuildConfig
@@ -91,10 +96,12 @@ private val THEME_OPTIONS = listOf(Theme.THEME_AUTO, Theme.THEME_LIGHT, Theme.TH
 @Composable
 fun SettingsDialog(
   curThemeOverride: Theme,
+  curFirebaseAnalytics: Boolean,
   modelManagerViewModel: ModelManagerViewModel,
   onDismissed: () -> Unit,
 ) {
   var selectedTheme by remember { mutableStateOf(curThemeOverride) }
+  var selectedFirebaseAnalytics by remember { mutableStateOf(curFirebaseAnalytics) }
   var hfToken by remember { mutableStateOf(modelManagerViewModel.getTokenStatusAndData().data) }
   val dateFormatter = remember {
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -126,7 +133,7 @@ fun SettingsDialog(
         // Dialog title and subtitle.
         Column {
           Text(
-            "Settings",
+            stringResource(R.string.drawer_settings_label),
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(bottom = 8.dp),
           )
@@ -147,7 +154,7 @@ fun SettingsDialog(
           // Theme switcher.
           Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
             Text(
-              "Theme",
+              stringResource(R.string.theme_title),
               style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
             )
             MultiChoiceSegmentedButtonRow {
@@ -181,11 +188,46 @@ fun SettingsDialog(
                     }
                   },
                   checked = theme == selectedTheme,
-                  label = { Text(themeLabel(theme)) },
+                  label = {
+                    Text(
+                      stringResource(themeLabelRes(theme)),
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                      softWrap = false,
+                    )
+                  },
                 )
               }
             }
           }
+
+            Row(
+              modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Column(
+                modifier = Modifier.weight(1f).padding(end = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+              ) {
+                Text(
+                  stringResource(R.string.settings_dialog_firebase_analytics_title),
+                  style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+                )
+                Text(
+                  stringResource(R.string.settings_dialog_firebase_analytics_description),
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+              Switch(
+                checked = selectedFirebaseAnalytics,
+                onCheckedChange = { checked ->
+                  selectedFirebaseAnalytics = checked
+                  modelManagerViewModel.saveFirebaseAnalytics(checked)
+                },
+              )
+            }
 
           // HF Token management.
           Column(
@@ -294,7 +336,7 @@ fun SettingsDialog(
           // Third party licenses.
           Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
             Text(
-              "Third-party libraries",
+              stringResource(R.string.third_party_libraries),
               style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
             )
             OutlinedButton(
@@ -305,7 +347,7 @@ fun SettingsDialog(
                 context.startActivity(intent)
               }
             ) {
-              Text("View licenses")
+              Text(stringResource(R.string.view_licenses))
             }
           }
 
@@ -321,12 +363,14 @@ fun SettingsDialog(
             ClickableLink(
               url = "https://ai.google.dev/gemma/terms",
               linkText = stringResource(R.string.tos_dialog_title_gemma),
-              modifier = Modifier.padding(top = 4.dp),
+              textAlign = TextAlign.Start,
+              modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             )
             ClickableLink(
               url = "https://ai.google.dev/gemma/prohibited_use_policy",
               linkText = stringResource(R.string.settings_dialog_gemma_prohibited_use_policy),
-              modifier = Modifier.padding(top = 8.dp),
+              textAlign = TextAlign.Start,
+              modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
           }
         }
@@ -337,7 +381,7 @@ fun SettingsDialog(
           horizontalArrangement = Arrangement.End,
         ) {
           // Close button
-          Button(onClick = { onDismissed() }) { Text("Close") }
+          Button(onClick = { onDismissed() }) { Text(stringResource(R.string.close)) }
         }
       }
     }
@@ -348,11 +392,11 @@ fun SettingsDialog(
   }
 }
 
-private fun themeLabel(theme: Theme): String {
-  return when (theme) {
-    Theme.THEME_AUTO -> "Auto"
-    Theme.THEME_LIGHT -> "Light"
-    Theme.THEME_DARK -> "Dark"
-    else -> "Unknown"
+@StringRes
+private fun themeLabelRes(theme: Theme): Int =
+  when (theme) {
+    Theme.THEME_AUTO -> R.string.theme_auto
+    Theme.THEME_LIGHT -> R.string.theme_light
+    Theme.THEME_DARK -> R.string.theme_dark
+    else -> R.string.unknown
   }
-}

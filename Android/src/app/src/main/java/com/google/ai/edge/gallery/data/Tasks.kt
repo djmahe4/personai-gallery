@@ -129,12 +129,14 @@ data class Task(
   val updateTrigger: MutableState<Long> = mutableLongStateOf(0),
 ) {
   fun allowCapability(capability: ModelCapability, model: Model): Boolean {
-    return model.capabilityToTaskTypes[capability]?.contains(id) == true
+    return model.allowCapability(capability = capability, taskId = id)
   }
 }
 
 object BuiltInTaskId {
   const val LLM_CHAT = "llm_chat"
+  /** The "Test it" task for testing user-imported OSS models in a multi-turn chat conversation. */
+  const val LLM_TEST = "llm_test"
   const val LLM_PROMPT_LAB = "llm_prompt_lab"
   const val LLM_ASK_IMAGE = "llm_ask_image"
   const val LLM_ASK_AUDIO = "llm_ask_audio"
@@ -144,9 +146,10 @@ object BuiltInTaskId {
   const val LLM_AGENT_CHAT = "llm_agent_chat"
 }
 
-private val allLegacyTaskIds: MutableSet<String> =
-  mutableSetOf(
+private val allLegacyTaskIds: Set<String> =
+  setOf(
     BuiltInTaskId.LLM_CHAT,
+    BuiltInTaskId.LLM_TEST,
     BuiltInTaskId.LLM_PROMPT_LAB,
     BuiltInTaskId.LLM_ASK_IMAGE,
     BuiltInTaskId.LLM_ASK_AUDIO,

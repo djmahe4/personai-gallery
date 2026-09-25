@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Update
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -44,7 +45,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
-import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.DownloadAndTryButton
 import com.google.ai.edge.gallery.ui.common.tos.TosViewModel
@@ -62,9 +62,12 @@ fun DownloadModelPanel(
   sharedTransitionScope: SharedTransitionScope,
   animatedVisibilityScope: AnimatedVisibilityScope,
   onTryItClicked: () -> Unit,
-  tosViewModel: TosViewModel? = null,
   modifier: Modifier = Modifier,
+  onBenchmarkClicked: (() -> Unit)? = null,
+  showBenchmarkActionButton: Boolean = false,
+  tosViewModel: TosViewModel? = null,
   downloadButtonBackgroundColor: Color = MaterialTheme.colorScheme.surfaceContainer,
+  isUpdatable: Boolean = false,
 ) {
   with(sharedTransitionScope) {
     Row(
@@ -74,12 +77,57 @@ fun DownloadModelPanel(
     ) {
       fun isDownloadButtonEnabled(downloadStatus: ModelDownloadStatusType?, model: Model): Boolean {
         val downloadFailed = downloadStatus == ModelDownloadStatusType.FAILED
-        val isLitertLm = model.runtimeType == RuntimeType.LITERT_LM
+        val isLitertLm = model.isLiteRtLm
         return !downloadFailed || isLitertLm
       }
 
+      val downloadSucceeded = downloadStatus == ModelDownloadStatusType.SUCCEEDED
+      if (showBenchmarkActionButton && downloadSucceeded && model.isLlm) {
+        val expandBenchmarkButton = isExpanded && !isUpdatable
+        // Benchmark button.
+        var buttonModifier: Modifier = Modifier.height(42.dp)
+        if (expandBenchmarkButton) {
+          buttonModifier = buttonModifier.weight(1f)
+        }
+        Button(
+          modifier =
+            Modifier.sharedElement(
+                sharedContentState = rememberSharedContentState(key = "benchmark_button"),
+                animatedVisibilityScope = animatedVisibilityScope,
+              )
+              .then(buttonModifier),
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = MaterialTheme.colorScheme.secondaryContainer
+            ),
+          contentPadding = PaddingValues(horizontal = 12.dp),
+          onClick = { onBenchmarkClicked?.invoke() },
+        ) {
+          val textColor = MaterialTheme.colorScheme.onSecondaryContainer
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Icon(Icons.Rounded.BarChart, contentDescription = null, tint = textColor)
+
+            if (expandBenchmarkButton) {
+              Text(
+                stringResource(R.string.benchmark),
+                color = textColor,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                autoSize =
+                  TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 16.sp, stepSize = 1.sp),
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+      }
+
       // Display an update button if the model is updatable.
-      if (model.updatable) {
+      if (isUpdatable) {
         var buttonModifier: Modifier = Modifier.height(42.dp)
         if (isExpanded) {
           buttonModifier = buttonModifier.weight(1f)
@@ -97,14 +145,7 @@ fun DownloadModelPanel(
               containerColor = MaterialTheme.colorScheme.secondaryContainer
             ),
           contentPadding = PaddingValues(horizontal = 12.dp),
-          onClick = {
-            model.latestModelFile?.let {
-              model.version = it.commitHash
-              model.downloadFileName = it.fileName
-            }
-            model.updatable = false
-            modelManagerViewModel.downloadModel(task, model)
-          },
+          onClick = { modelManagerViewModel.downloadModel(task, model) },
         ) {
           val textColor = MaterialTheme.colorScheme.onSecondaryContainer
           Row(

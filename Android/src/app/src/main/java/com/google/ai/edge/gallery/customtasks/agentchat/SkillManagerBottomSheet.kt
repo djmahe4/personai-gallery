@@ -112,6 +112,7 @@ import com.google.ai.edge.gallery.data.AgentSkillsURLs
 import com.google.ai.edge.gallery.data.MAX_RECOMMENDED_SKILL_COUNT
 import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.proto.Skill
+import com.google.ai.edge.gallery.tools.getSkillSecretKey
 import com.google.ai.edge.gallery.ui.common.FloatingBanner
 import com.google.ai.edge.gallery.ui.common.GalleryWebView
 import com.google.ai.edge.gallery.ui.theme.customColors
@@ -740,7 +741,7 @@ fun SkillManagerBottomSheet(
     skillState?.let {
       var curSecret by remember {
         mutableStateOf(
-          skillManagerViewModel.dataStoreRepository.readSecret(
+          skillManagerViewModel.skillManager.dataStoreRepository.readSecret(
             getSkillSecretKey(skillName = it.skill.name)
           ) ?: ""
         )
@@ -751,7 +752,7 @@ fun SkillManagerBottomSheet(
         value = curSecret,
         onValueChange = { curSecret = it },
         onDone = {
-          skillManagerViewModel.dataStoreRepository.saveSecret(
+          skillManagerViewModel.skillManager.dataStoreRepository.saveSecret(
             key = getSkillSecretKey(skillName = it.skill.name),
             value = curSecret,
           )
