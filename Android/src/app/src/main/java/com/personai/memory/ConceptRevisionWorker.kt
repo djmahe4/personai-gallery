@@ -2,8 +2,13 @@ package com.personai.memory
 
 import android.content.Context
 import android.util.Log
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import java.util.concurrent.TimeUnit
 
 /**
  * Android WorkManager CoroutineWorker for periodic concept revision passes.
@@ -27,11 +32,12 @@ class ConceptRevisionWorker(
 
         return try {
             val dao = database.memoryDao()
-            val allMemories = dao.getAll()
+            // Query only items due for revision or with pending reviews instead of entire table
+            val dueMemories = dao.getDueForRevision(now)
             var revisionCandidateCount = 0
-            val updatedMemories = ArrayList<MemoryItemEntity>(allMemories.size)
+            val updatedMemories = ArrayList<MemoryItemEntity>(dueMemories.size)
 
-            for (memory in allMemories) {
+            for (memory in dueMemories) {
                 val decayedMemory = decayEngine.applyDecay(memory, now)
                 if (decayEngine.isDueForRevision(decayedMemory, now)) {
                     revisionCandidateCount++
@@ -57,5 +63,27 @@ class ConceptRevisionWorker(
 
     companion object {
         private const val TAG = "ConceptRevisionWorker"
+        const val WORK_NAME = "personai_concept_revision_work"
+
+        /**
+         * Enqueues periodic concept revision with strict resource constraints.
+         */
+        fun enqueuePeriodic(context: Context, repeatIntervalHours: Long = 6) {
+            val constraints = Constraints.Builder()
+                .setRequiresDeviceIdle(true)
+                .setRequiresBatteryNotLow(true)
+                .build()
+
+            val workRequest = PeriodicWorkRequestBuilder<ConceptRevisionWorker>(
+                repeatIntervalHours,
+                TimeUnit.HOURS
+            ).setConstraints(constraints).build()
+
+            WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(
+                WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                workRequest
+            )
+        }
     }
 }

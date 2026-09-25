@@ -38,6 +38,8 @@ class FilePromptLinkerTest {
             items.filter { it.conceptTag == tag }
         override suspend fun getDueForRevision(cutoffTimestamp: Long): List<MemoryItemEntity> =
             items.filter { it.nextReviewAt <= cutoffTimestamp }
+        override suspend fun getBatch(limit: Int, offset: Int): List<MemoryItemEntity> =
+            items.sortedByDescending { it.id }.drop(offset).take(limit)
         override suspend fun deleteById(id: Long) { items.removeAll { it.id == id } }
         override suspend fun clearAll() { items.clear() }
     }

@@ -33,3 +33,5 @@ Subagent definitions mapped from `.github/skills/`:
 - **Zero-Modification Upstream Rule**: Never modify files in `com.google.ai.edge.gallery`. Add only new packages under `com.personai.*`.
 - **TDD Workflow**: Write failing test first, verify failure, implement minimal code, verify pass.
 - **On-Device & Resource-Aware**: All inference runs locally with strict WorkManager constraints (`setRequiresDeviceIdle(true)`, `setRequiresBatteryNotLow(true)`).
+- **Additive Frontend UI Rule**: Evaluate and implement additive UI components for every stage (e.g. `PersonaTrackingPreferencesFragment`, `MemoryRevisionDashboardFragment`). Never alter original Gallery navigation routes directly; add tests verifying UI contract.
+- **Context7 Auto-Research**: Consult Context7 MCP for new library integration and on-device API patterns before generating implementations.

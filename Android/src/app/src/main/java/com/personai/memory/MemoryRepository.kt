@@ -5,7 +5,9 @@ package com.personai.memory
  */
 data class ScoredMemoryItem(
     val item: MemoryItemEntity,
-    val score: Float
+    val score: Float,
+    val matchedSnippet: String? = null,
+    val matchedWindowIndex: Int? = null
 )
 
 /**
@@ -41,25 +43,102 @@ class MemoryRepository(
     suspend fun searchSimilar(
         query: String,
         threshold: Float = 0.5f,
-        limit: Int = 5
-    ): List<ScoredMemoryItem> {
+        limit: Int = 5,
+        maxCandidates: Int = 500
+    ): List<ScoredMemoryItem> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val queryVector = vectorizer.vectorize(query)
-        val allItems = memoryDao.getAll()
+        val scoredList = mutableListOf<ScoredMemoryItem>()
+        var offset = 0
+        val batchSize = 100
 
-        return allItems.asSequence()
-            .mapNotNull { item ->
+        while (offset < maxCandidates) {
+            val currentLimit = minOf(batchSize, maxCandidates - offset)
+            val batch = memoryDao.getBatch(limit = currentLimit, offset = offset)
+            if (batch.isEmpty()) break
+
+            for (item in batch) {
                 val itemVector = item.embedding.toFloatArray()
-                if (itemVector.size != queryVector.size) {
-                    null
-                } else {
+                if (itemVector.size == queryVector.size) {
                     val similarity = vectorizer.cosineSimilarity(queryVector, itemVector)
-                    ScoredMemoryItem(item = item, score = similarity)
+                    if (similarity >= threshold) {
+                        scoredList.add(ScoredMemoryItem(item = item, score = similarity))
+                    }
                 }
             }
-            .filter { it.score >= threshold }
+            if (batch.size < currentLimit) break
+            offset += currentLimit
+        }
+
+        scoredList
             .sortedByDescending { it.score }
             .take(limit)
-            .toList()
+    }
+
+    /**
+     * Executes localized semantic search using sliding windows over long memory content.
+     * Prevents diluted retrieval scores where localized needle keywords are obscured in long documents.
+     */
+    suspend fun searchSimilarSlidingWindow(
+        query: String,
+        threshold: Float = 0.25f,
+        limit: Int = 5,
+        maxCandidates: Int = 500,
+        windowSize: Int = 32,
+        stepSize: Int = 16
+    ): List<ScoredMemoryItem> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        val queryVector = vectorizer.vectorize(query)
+        val scoredList = mutableListOf<ScoredMemoryItem>()
+        var offset = 0
+        val batchSize = 100
+
+        while (offset < maxCandidates) {
+            val currentLimit = minOf(batchSize, maxCandidates - offset)
+            val batch = memoryDao.getBatch(limit = currentLimit, offset = offset)
+            if (batch.isEmpty()) break
+
+            for (item in batch) {
+                val itemVector = item.embedding.toFloatArray()
+                val wholeDocScore = if (itemVector.size == queryVector.size) {
+                    vectorizer.cosineSimilarity(queryVector, itemVector)
+                } else 0.0f
+
+                // Token sliding window over content
+                val windows = vectorizer.vectorizeSlidingWindow(
+                    text = item.content,
+                    windowSize = windowSize,
+                    stepSize = stepSize
+                )
+                val bestMatch = vectorizer.bestMatchingWindow(queryVector, windows)
+
+                val bestWindowScore = bestMatch?.second ?: -1.0f
+                val finalScore = maxOf(wholeDocScore, bestWindowScore)
+
+                if (finalScore >= threshold) {
+                    val matchedSnippet = if (bestMatch != null && bestWindowScore >= wholeDocScore) {
+                        bestMatch.first.text
+                    } else null
+
+                    val matchedIndex = if (bestMatch != null && bestWindowScore >= wholeDocScore) {
+                        bestMatch.first.index
+                    } else null
+
+                    scoredList.add(
+                        ScoredMemoryItem(
+                            item = item,
+                            score = finalScore,
+                            matchedSnippet = matchedSnippet,
+                            matchedWindowIndex = matchedIndex
+                        )
+                    )
+                }
+            }
+            if (batch.size < currentLimit) break
+            offset += currentLimit
+        }
+
+        scoredList
+            .sortedByDescending { it.score }
+            .take(limit)
     }
 
     suspend fun findMemoriesForFile(fileUri: String): List<MemoryItemEntity> {

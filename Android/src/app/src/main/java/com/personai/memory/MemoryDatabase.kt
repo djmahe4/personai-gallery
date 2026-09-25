@@ -73,6 +73,9 @@ interface MemoryDao {
     @Query("SELECT * FROM memory_items ORDER BY id DESC")
     suspend fun getAll(): List<MemoryItemEntity>
 
+    @Query("SELECT * FROM memory_items ORDER BY id DESC LIMIT :limit OFFSET :offset")
+    suspend fun getBatch(limit: Int, offset: Int): List<MemoryItemEntity>
+
     @Query("SELECT * FROM memory_items WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): MemoryItemEntity?
 

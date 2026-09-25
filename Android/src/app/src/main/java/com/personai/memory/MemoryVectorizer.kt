@@ -80,12 +80,107 @@ class MemoryVectorizer(
     }
 
     private fun tokenize(text: String): List<String> {
-        return TOKEN_SPLIT_REGEX.split(PUNCTUATION_REGEX.replace(text.lowercase(), " "))
+        return TOKEN_SPLIT_REGEX.split(PUNCTUATION_REGEX.replace(text.lowercase(java.util.Locale.ROOT), " "))
             .filter { it.isNotBlank() }
+    }
+
+    /**
+     * Splits [text] into overlapping token windows and produces normalized vector embeddings for each.
+     * Guarantees localized context is preserved across long documents without missing sub-phrases.
+     */
+    fun vectorizeSlidingWindow(
+        text: String,
+        windowSize: Int = 32,
+        stepSize: Int = 16
+    ): List<TextWindow> {
+        require(windowSize > 0) { "windowSize must be positive: $windowSize" }
+        require(stepSize > 0) { "stepSize must be positive: $stepSize" }
+
+        val tokens = tokenize(text)
+        if (tokens.isEmpty()) return emptyList()
+
+        if (tokens.size <= windowSize) {
+            val windowText = tokens.joinToString(" ")
+            return listOf(
+                TextWindow(
+                    index = 0,
+                    text = windowText,
+                    vector = vectorize(windowText)
+                )
+            )
+        }
+
+        val windows = mutableListOf<TextWindow>()
+        var startIdx = 0
+        var windowIndex = 0
+
+        while (startIdx < tokens.size) {
+            val endIdx = (startIdx + windowSize).coerceAtMost(tokens.size)
+            val windowTokens = tokens.subList(startIdx, endIdx)
+            val windowText = windowTokens.joinToString(" ")
+            windows.add(
+                TextWindow(
+                    index = windowIndex++,
+                    text = windowText,
+                    vector = vectorize(windowText)
+                )
+            )
+            startIdx += stepSize
+        }
+
+        return windows
+    }
+
+    /**
+     * Identifies the window with the highest cosine similarity against [queryVector].
+     * Returns the matching [TextWindow] along with its calculated score, or null if no windows exist.
+     */
+    fun bestMatchingWindow(
+        queryVector: FloatArray,
+        windows: List<TextWindow>
+    ): Pair<TextWindow, Float>? {
+        if (windows.isEmpty()) return null
+        var bestWindow: TextWindow? = null
+        var maxScore = -1.0f
+
+        for (window in windows) {
+            val score = cosineSimilarity(queryVector, window.vector)
+            if (score > maxScore) {
+                maxScore = score
+                bestWindow = window
+            }
+        }
+
+        return bestWindow?.let { Pair(it, maxScore) }
     }
 
     companion object {
         private val PUNCTUATION_REGEX = Regex("[^\\p{L}\\p{Nd}\\s]")
         private val TOKEN_SPLIT_REGEX = Regex("\\s+")
+    }
+}
+
+/**
+ * Encapsulates an individual text chunk extracted via sliding window with its positional index and vector.
+ */
+data class TextWindow(
+    val index: Int,
+    val text: String,
+    val vector: FloatArray
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as TextWindow
+        if (index != other.index) return false
+        if (text != other.text) return false
+        return vector.contentEquals(other.vector)
+    }
+
+    override fun hashCode(): Int {
+        var result = index
+        result = 31 * result + text.hashCode()
+        result = 31 * result + vector.contentHashCode()
+        return result
     }
 }

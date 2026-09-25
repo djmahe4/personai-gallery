@@ -34,7 +34,7 @@ class PackageScaffoldingTest {
     val protectedGalleryClasses = listOf(
         "com.google.ai.edge.gallery.MainActivity",
         "com.google.ai.edge.gallery.GalleryApplication",
-        "com.google.ai.edge.gallery.ui.navigation.GalleryNavGraph",
+        "com.google.ai.edge.gallery.ui.navigation.GalleryNavGraphKt",
     )
 
     protectedGalleryClasses.forEach { className ->

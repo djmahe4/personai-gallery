@@ -55,4 +55,53 @@ class MemoryVectorizerTest {
         val similarity = vectorizer.cosineSimilarity(v1, v2)
         assertTrue("Disjoint text similarity should be low (< 0.25f), was $similarity", similarity < 0.25f)
     }
+
+    @Test
+    fun slidingWindowGeneratesOverlappingWindows() {
+        val words = (1..60).joinToString(" ") { "word$it" }
+        val windows = vectorizer.vectorizeSlidingWindow(words, windowSize = 20, stepSize = 10)
+        // 60 tokens with window 20 and step 10 -> window starts at 0, 10, 20, 30, 40, 50 -> 6 windows
+        assertEquals(6, windows.size)
+        assertEquals(0, windows[0].index)
+        assertEquals(128, windows[0].vector.size)
+        assertTrue(windows[0].text.startsWith("word1"))
+    }
+
+    @Test
+    fun slidingWindowFindsLocalizedNeedleInLongHaystack() {
+        val preamble = (1..50).joinToString(" ") { "irrelevant intro context data point $it" }
+        val needle = "quantum entanglement cryptographic key distribution"
+        val postamble = (1..50).joinToString(" ") { "unrelated ending details section $it" }
+        val longDoc = "$preamble $needle $postamble"
+
+        val queryVec = vectorizer.vectorize("quantum key distribution")
+        val wholeDocVec = vectorizer.vectorize(longDoc)
+        val wholeDocScore = vectorizer.cosineSimilarity(queryVec, wholeDocVec)
+
+        val windows = vectorizer.vectorizeSlidingWindow(longDoc, windowSize = 20, stepSize = 10)
+        val best = vectorizer.bestMatchingWindow(queryVec, windows)
+
+        org.junit.Assert.assertNotNull(best)
+        // Sliding window local match must significantly outperform diluted whole-doc score
+        assertTrue("Sliding window score (${best!!.second}) should exceed diluted whole doc score ($wholeDocScore)", best.second > wholeDocScore)
+        assertTrue("Best match score should be > 0.2, was ${best.second}", best.second > 0.2f)
+        assertTrue("Matched snippet should contain needle words", best.first.text.contains("entanglement") || best.first.text.contains("cryptographic"))
+    }
+
+    @Test
+    fun multiScenarioUnicodeAndHighNoiseInputs() {
+        val unicodeDoc = "Kotlin 语言 协程 and 機械学習 models on デバイス edge"
+        val vec1 = vectorizer.vectorize(unicodeDoc)
+        assertEquals(128, vec1.size)
+        val vec2 = vectorizer.vectorize(unicodeDoc)
+        val sim = vectorizer.cosineSimilarity(vec1, vec2)
+        assertEquals(1.0f, sim, 0.001f)
+
+        // Noise and special characters
+        val noisyText = "  !!!###  Machine-Learning...   +++ AI ???  "
+        val cleanText = "Machine Learning AI"
+        val vNoise = vectorizer.vectorize(noisyText)
+        val vClean = vectorizer.vectorize(cleanText)
+        assertEquals(1.0f, vectorizer.cosineSimilarity(vNoise, vClean), 0.001f)
+    }
 }

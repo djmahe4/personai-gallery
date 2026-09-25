@@ -47,6 +47,9 @@ class MemoryRepositoryTest {
         override suspend fun getDueForRevision(cutoffTimestamp: Long): List<MemoryItemEntity> =
             items.filter { it.nextReviewAt <= cutoffTimestamp }
 
+        override suspend fun getBatch(limit: Int, offset: Int): List<MemoryItemEntity> =
+            items.sortedByDescending { it.id }.drop(offset).take(limit)
+
         override suspend fun deleteById(id: Long) {
             items.removeAll { it.id == id }
         }
@@ -112,5 +115,28 @@ class MemoryRepositoryTest {
 
         val due = repository.getPendingRevisions(now)
         assertEquals(1, due.size)
+    }
+
+    @Test
+    fun searchSimilarSlidingWindowFindsSubstrInLargeDoc() = runBlocking {
+        val filler = (1..60).joinToString(" ") { "general android mobile UI layout item $it" }
+        val secretNeedle = "confidential neural architecture optimization for edge inference"
+        val largeDoc = "$filler $secretNeedle $filler"
+
+        repository.saveMemory(largeDoc, conceptTag = "deep-dive")
+        repository.saveMemory("Standard recipe for cookies and pastry", conceptTag = "cooking")
+
+        val results = repository.searchSimilarSlidingWindow(
+            query = "neural architecture optimization",
+            threshold = 0.25f,
+            limit = 3,
+            windowSize = 24,
+            stepSize = 12
+        )
+
+        assertEquals(1, results.size)
+        assertEquals("deep-dive", results[0].item.conceptTag)
+        org.junit.Assert.assertNotNull(results[0].matchedSnippet)
+        assertTrue(results[0].matchedSnippet!!.contains("neural") || results[0].matchedSnippet!!.contains("architecture"))
     }
 }
