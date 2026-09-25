@@ -18,14 +18,22 @@ import kotlinx.coroutines.withContext
  */
 class MemoryRevisionDashboardFragment : Fragment() {
 
-    private lateinit var repository: MemoryRepository
+    private var repository: MemoryRepository? = null
     private var dueCount: Int = 0
+
+    override fun onAttach(context: Context) {
+        super.onAttach(context)
+        val db = MemoryDatabase.getInstance(context)
+        repository = MemoryRepository(db.memoryDao())
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        context?.let { ctx ->
-            val db = MemoryDatabase.getInstance(ctx)
-            repository = MemoryRepository(db.memoryDao())
+        if (repository == null) {
+            context?.let { ctx ->
+                val db = MemoryDatabase.getInstance(ctx)
+                repository = MemoryRepository(db.memoryDao())
+            }
         }
     }
 
@@ -41,8 +49,12 @@ class MemoryRevisionDashboardFragment : Fragment() {
     }
 
     fun refreshDueRevisions(scope: CoroutineScope, currentTime: Long = System.currentTimeMillis(), onLoaded: (Int) -> Unit = {}) {
+        val repo = repository ?: context?.let { ctx ->
+            MemoryRepository(MemoryDatabase.getInstance(ctx).memoryDao()).also { repository = it }
+        } ?: return
+
         scope.launch(Dispatchers.Default) {
-            val due = repository.getPendingRevisions(currentTime)
+            val due = repo.getPendingRevisions(currentTime)
             withContext(Dispatchers.Main) {
                 dueCount = due.size
                 view?.findViewById<TextView>(android.R.id.text1)?.text = "Due Concept Revisions: $dueCount"
