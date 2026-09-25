@@ -133,6 +133,18 @@ dependencies {
   implementation(libs.ktor.client.android)
   implementation(libs.ktor.client.core)
   implementation(libs.tasks.vision)
+  implementation(libs.androidx.room.ktx)
+  implementation(libs.mlkit.entity.extraction)
+  implementation(libs.mlkit.text.recognition)
+  implementation(libs.tink.android)
+  implementation(libs.commons.math3)
+  implementation(libs.androidx.documentfile)
+  implementation(libs.snakeyaml)
+  ksp(libs.androidx.room.compiler)
+  testImplementation(libs.junit.jupiter)
+  testImplementation(libs.mockk)
+  testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.test.core.ktx)
 }
 
 configurations.all {
