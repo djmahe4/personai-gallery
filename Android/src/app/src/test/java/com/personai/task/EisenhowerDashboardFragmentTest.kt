@@ -57,6 +57,10 @@ class EisenhowerDashboardFragmentTest {
         assertEquals(5, restoredFragment.currentViewState().q2Count)
         assertEquals(1, restoredFragment.currentViewState().q3Count)
         assertEquals(0, restoredFragment.currentViewState().q4Count)
+        assertEquals(1, restoredFragment.currentViewState().topSuggestions.size)
+        assertEquals("Fix Bug", restoredFragment.currentViewState().topSuggestions[0].task.title)
+        assertEquals("Immediate attention required", restoredFragment.currentViewState().topSuggestions[0].rationale)
+        assertEquals("Do Now", restoredFragment.currentViewState().topSuggestions[0].actionLabel)
         assertNotNull(restoredFragment)
     }
 }
