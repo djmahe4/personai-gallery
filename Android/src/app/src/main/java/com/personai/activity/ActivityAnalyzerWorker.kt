@@ -35,7 +35,7 @@ class ActivityAnalyzerWorker(
         }
 
         val appOps = applicationContext.getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager
-        val mode = appOps?.unsafeCheckOpNoThrow(
+        val mode = appOps?.noteOpNoThrow(
             android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
             android.os.Process.myUid(),
             applicationContext.packageName

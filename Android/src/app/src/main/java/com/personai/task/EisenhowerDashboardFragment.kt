@@ -40,6 +40,33 @@ class EisenhowerDashboardFragment : Fragment() {
 
     fun currentViewState(): EisenhowerDashboardViewState = dashboardState.value
 
+    fun saveState(outState: Bundle) {
+        val current = dashboardState.value
+        outState.putInt(KEY_Q1, current.q1Count)
+        outState.putInt(KEY_Q2, current.q2Count)
+        outState.putInt(KEY_Q3, current.q3Count)
+        outState.putInt(KEY_Q4, current.q4Count)
+    }
+
+    fun restoreState(savedState: Bundle) {
+        dashboardState.value = EisenhowerDashboardViewState(
+            q1Count = savedState.getInt(KEY_Q1, 0),
+            q2Count = savedState.getInt(KEY_Q2, 0),
+            q3Count = savedState.getInt(KEY_Q3, 0),
+            q4Count = savedState.getInt(KEY_Q4, 0)
+        )
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        savedInstanceState?.let { restoreState(it) }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        saveState(outState)
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -60,6 +87,13 @@ class EisenhowerDashboardFragment : Fragment() {
                 }
             }
         }
+    }
+
+    companion object {
+        private const val KEY_Q1 = "key_q1_count"
+        private const val KEY_Q2 = "key_q2_count"
+        private const val KEY_Q3 = "key_q3_count"
+        private const val KEY_Q4 = "key_q4_count"
     }
 }
 

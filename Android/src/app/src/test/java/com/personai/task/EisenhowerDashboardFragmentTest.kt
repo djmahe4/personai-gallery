@@ -46,6 +46,17 @@ class EisenhowerDashboardFragmentTest {
 
         assertNotNull(clickedSuggestion)
         assertEquals("Fix Bug", clickedSuggestion?.task?.title)
-        assertNotNull(fragment)
+
+        // Verify state preservation across bundle save/restore
+        val outBundle = android.os.Bundle()
+        fragment.saveState(outBundle)
+
+        val restoredFragment = EisenhowerDashboardFragment()
+        restoredFragment.restoreState(outBundle)
+        assertEquals(2, restoredFragment.currentViewState().q1Count)
+        assertEquals(5, restoredFragment.currentViewState().q2Count)
+        assertEquals(1, restoredFragment.currentViewState().q3Count)
+        assertEquals(0, restoredFragment.currentViewState().q4Count)
+        assertNotNull(restoredFragment)
     }
 }
