@@ -16,7 +16,7 @@ class ConceptRevisionWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val database: MemoryDatabase by lazy {
-        MemoryDatabase.getInstance(applicationContext)
+        MemoryDatabase.getInstance(appContext)
     }
 
     private val decayEngine = EbbinghausDecayEngine()
