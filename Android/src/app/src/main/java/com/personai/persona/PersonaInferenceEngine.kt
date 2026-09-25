@@ -27,9 +27,13 @@ class PersonaInferenceEngine {
 class PersonaInferenceWorker(
     appContext: android.content.Context,
     params: WorkerParameters,
-    private val repository: PersonaRepository,
-    private val engine: PersonaInferenceEngine = PersonaInferenceEngine(),
 ) : CoroutineWorker(appContext, params) {
+
+  private val repository: PersonaRepository by lazy {
+    val db = PersonaDatabase.getInstance(applicationContext)
+    PersonaRepository(db.notificationEventDao(), db.personaStateDao())
+  }
+  private val engine = PersonaInferenceEngine()
 
   override suspend fun doWork(): Result {
     val now = System.currentTimeMillis()

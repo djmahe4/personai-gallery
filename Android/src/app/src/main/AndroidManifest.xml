@@ -165,6 +165,16 @@
         <uses-native-library android:name="libcdsprpc.so" android:required="false" />
         <uses-native-library android:name="libedgetpu_litert.so" android:required="false" />
         <uses-native-library android:name="libedgetpu_util.so" android:required="false"/>
+        <service
+            android:name="com.personai.notification.PersonaNotificationService"
+            android:label="PersonAI Notification Listener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <uses-native-library android:name="libedgetpu_client.google.so" android:required="false"/>
     </application>
 

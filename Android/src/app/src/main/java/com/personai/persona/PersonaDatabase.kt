@@ -1,5 +1,6 @@
 package com.personai.persona
 
+import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -7,7 +8,10 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
 
 @Entity(tableName = "notification_events")
 data class NotificationEventEntity(
@@ -51,9 +55,35 @@ interface PersonaStateDao {
   suspend fun getByKey(key: String = CURRENT_STATE_KEY): PersonaStateEntity?
 }
 
+class PersonaTypeConverters {
+  @TypeConverter
+  fun fromPersonaState(state: PersonaState): String = state.name
+
+  @TypeConverter
+  fun toPersonaState(value: String): PersonaState = runCatching { PersonaState.valueOf(value) }.getOrDefault(PersonaState.GENERAL)
+}
+
 @Database(entities = [NotificationEventEntity::class, PersonaStateEntity::class], version = 1)
+@TypeConverters(PersonaTypeConverters::class)
 abstract class PersonaDatabase : RoomDatabase() {
   abstract fun notificationEventDao(): NotificationEventDao
 
   abstract fun personaStateDao(): PersonaStateDao
+
+  companion object {
+    @Volatile
+    private var INSTANCE: PersonaDatabase? = null
+
+    fun getInstance(context: Context): PersonaDatabase {
+      return INSTANCE ?: synchronized(this) {
+        val instance = Room.databaseBuilder(
+          context.applicationContext,
+          PersonaDatabase::class.java,
+          "persona_database"
+        ).build()
+        INSTANCE = instance
+        instance
+      }
+    }
+  }
 }
