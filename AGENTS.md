@@ -11,15 +11,23 @@ Use **Gradle** in `Android/src`:
 | Single Test | `cd Android/src && ./gradlew testDebugUnitTest --tests "com.personai.<package>.<TestClass>"` |
 | Module Lint | `cd Android/src && ./gradlew lintDebug` |
 
+## Branch & PR Workflow
+- Always branch out: `feat/stage-<N>-<feature-name>` from `copilot/implement-personai-gallery`.
+- Submit PR targeting `copilot/implement-personai-gallery`.
+- Squash and merge upon passing tests and audit.
+
 ## Commit Attribution
 AI commits MUST include:
 ```
 Co-Authored-By: (the agent model's name and attribution byline)
 ```
 
-## Context & Token Efficiency Skills
-- **`caveman`** (`.github/skills/caveman/SKILL.md`): Ultra-compressed communication mode. Cuts tokens 65% while keeping exact technical substance.
-- **`cavecrew`** (`.github/skills/cavecrew/SKILL.md`): Subagent delegation presets (`cavecrew-investigator`, `cavecrew-builder`, `cavecrew-reviewer`) with compressed tool results to preserve session context.
+## Cavecrew Delegation Workflow
+Subagent definitions mapped from `.github/skills/`:
+- **`cavecrew_investigator`** (`.github/skills/cavecrew/SKILL.md` + `.github/skills/writing-plans/SKILL.md`): Codebase investigation & atomic TDD plan creation (`docs/plans/YYYY-MM-DD-<stage>.md`).
+- **`cavecrew_builder`** (`.github/skills/cavecrew/SKILL.md` + `.github/skills/executing-plans/SKILL.md`): Surgical TDD execution (failing test -> minimal code -> pass).
+- **`cavecrew_reviewer`** (`.github/skills/cavecrew/SKILL.md` + `.github/skills/vibe-code-auditor/SKILL.md`): 7-dimension production code audit, PLFS scoring, hardening.
+- **`caveman`** (`.github/skills/caveman/SKILL.md`): Terse compressed output mode across all interactions.
 
 ## Key Architecture Conventions
 - **Zero-Modification Upstream Rule**: Never modify files in `com.google.ai.edge.gallery`. Add only new packages under `com.personai.*`.
