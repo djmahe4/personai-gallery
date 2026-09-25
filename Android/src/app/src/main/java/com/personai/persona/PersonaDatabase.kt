@@ -63,7 +63,7 @@ class PersonaTypeConverters {
   fun toPersonaState(value: String): PersonaState = runCatching { PersonaState.valueOf(value) }.getOrDefault(PersonaState.GENERAL)
 }
 
-@Database(entities = [NotificationEventEntity::class, PersonaStateEntity::class], version = 1)
+@Database(entities = [NotificationEventEntity::class, PersonaStateEntity::class], version = 1, exportSchema = false)
 @TypeConverters(PersonaTypeConverters::class)
 abstract class PersonaDatabase : RoomDatabase() {
   abstract fun notificationEventDao(): NotificationEventDao
