@@ -55,3 +55,9 @@ User Prompt / Device Signals
 - `com.personai.mcp`
 - `com.personai.ratelimit`
 - `com.personai.hitl`
+
+## Stage 1 additions
+- `PersonaNotificationService` for notification extraction with battery/doze guard.
+- `PersonaDatabase` + `PersonaRepository` for `notification_events` and persona state persistence.
+- `PersonaInferenceEngine` (with worker entry point) for focused-work inference from notification batches.
+- `PersonaTrackingPreferencesFragment` as additive user preference UI surface for tracked packages/people.

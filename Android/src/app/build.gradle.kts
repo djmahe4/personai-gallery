@@ -140,6 +140,7 @@ dependencies {
   implementation(libs.commons.math3)
   implementation(libs.androidx.documentfile)
   implementation(libs.snakeyaml)
+  implementation(libs.androidx.fragment.ktx)
   ksp(libs.androidx.room.compiler)
   testImplementation(libs.junit.jupiter)
   testImplementation(libs.mockk)
