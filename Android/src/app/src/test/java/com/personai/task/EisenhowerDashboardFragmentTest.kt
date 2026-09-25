@@ -32,12 +32,20 @@ class EisenhowerDashboardFragmentTest {
             )
         )
 
-        assertEquals(2, viewState.q1Count)
-        assertEquals(5, viewState.q2Count)
-        assertEquals(1, viewState.q3Count)
-        assertEquals(0, viewState.q4Count)
-        assertEquals(1, viewState.topSuggestions.size)
-        assertEquals("Fix Bug", viewState.topSuggestions[0].task.title)
+        fragment.updateViewState(viewState)
+        assertEquals(2, fragment.currentViewState().q1Count)
+        assertEquals(5, fragment.currentViewState().q2Count)
+        assertEquals(1, fragment.currentViewState().q3Count)
+        assertEquals(0, fragment.currentViewState().q4Count)
+        assertEquals(1, fragment.currentViewState().topSuggestions.size)
+        assertEquals("Fix Bug", fragment.currentViewState().topSuggestions[0].task.title)
+
+        var clickedSuggestion: TaskSuggestion? = null
+        fragment.onActionClickListener = { clickedSuggestion = it }
+        fragment.onActionClickListener?.invoke(viewState.topSuggestions[0])
+
+        assertNotNull(clickedSuggestion)
+        assertEquals("Fix Bug", clickedSuggestion?.task?.title)
         assertNotNull(fragment)
     }
 }

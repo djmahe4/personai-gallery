@@ -34,6 +34,17 @@ class ActivityAnalyzerWorker(
             return Result.retry()
         }
 
+        val appOps = applicationContext.getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager
+        val mode = appOps?.unsafeCheckOpNoThrow(
+            android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            applicationContext.packageName
+        )
+        if (mode != android.app.AppOpsManager.MODE_ALLOWED) {
+            Log.w(TAG, "UsageStats permission not granted; deferring activity analysis.")
+            return Result.failure()
+        }
+
         return try {
             val usageStatsManager = applicationContext.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             val endMillis = System.currentTimeMillis()
@@ -53,8 +64,9 @@ class ActivityAnalyzerWorker(
                 }
             }
 
-            val peakHours = patternModel.detectHourlyPeaks(timestamps)
-            val focusWindow = patternModel.recommendFocusWindow(timestamps)
+            val utcZone = java.time.ZoneOffset.UTC
+            val peakHours = patternModel.detectHourlyPeaks(timestamps, zoneId = utcZone)
+            val focusWindow = patternModel.recommendFocusWindow(timestamps, zoneId = utcZone)
 
             Log.i(TAG, "Activity analysis complete: peaks=$peakHours, suggested focus=$focusWindow")
             Result.success()

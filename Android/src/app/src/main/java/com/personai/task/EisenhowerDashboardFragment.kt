@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -30,6 +30,15 @@ import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 
 class EisenhowerDashboardFragment : Fragment() {
+
+    private val dashboardState = mutableStateOf(EisenhowerDashboardViewState())
+    var onActionClickListener: ((TaskSuggestion) -> Unit)? = null
+
+    fun updateViewState(newState: EisenhowerDashboardViewState) {
+        dashboardState.value = newState
+    }
+
+    fun currentViewState(): EisenhowerDashboardViewState = dashboardState.value
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -42,8 +51,10 @@ class EisenhowerDashboardFragment : Fragment() {
                 MaterialTheme {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         EisenhowerDashboardScreen(
-                            state = EisenhowerDashboardViewState(),
-                            onActionClick = {}
+                            state = dashboardState.value,
+                            onActionClick = { suggestion ->
+                                onActionClickListener?.invoke(suggestion)
+                            }
                         )
                     }
                 }

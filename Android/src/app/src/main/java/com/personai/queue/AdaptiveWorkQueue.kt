@@ -49,8 +49,10 @@ class AdaptiveWorkQueue(
                 if (nextItem != null) {
                     try {
                         nextItem.action.invoke()
+                    } catch (ce: kotlinx.coroutines.CancellationException) {
+                        throw ce
                     } catch (t: Throwable) {
-                        // Log or handle failure
+                        android.util.Log.e("AdaptiveWorkQueue", "Error executing work item ${nextItem.id}", t)
                     }
 
                     // Apply CPU throttle / pacing delay between jobs
