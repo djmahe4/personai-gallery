@@ -37,6 +37,7 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Additional permission required for push notification handling -->
     <!-- Required for resurfacing notifications after boot -->
@@ -176,6 +177,22 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+        </service>
+
+        <service
+            android:name="com.personai.agent.OverlayChatService"
+            android:exported="false" />
+
+        <service
+            android:name="com.personai.agent.PersonAIAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/personai_accessibility_service_config" />
         </service>
 
         <uses-native-library android:name="libedgetpu_client.google.so" android:required="false"/>
